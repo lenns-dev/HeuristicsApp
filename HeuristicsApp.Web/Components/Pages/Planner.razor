@@ -1,0 +1,133 @@
+@page "/planner"
+@rendermode InteractiveServer
+@inject PlanningApiClient Api
+
+<PageTitle>Planner</PageTitle>
+
+<h1>Planificación de picking</h1>
+<p>Selecciona un almacén y las heurísticas de batching y routing a ejecutar.</p>
+
+@if (loadError is not null)
+{
+    <div class="alert alert-danger">No se pudo cargar el catálogo: @loadError</div>
+}
+else if (warehouses is null || strategies is null)
+{
+    <p><em>Cargando catálogo…</em></p>
+}
+else if (warehouses.Count == 0)
+{
+    <div class="alert alert-warning">No hay instancias de almacén cargadas en el servicio.</div>
+}
+else
+{
+    <div class="row g-3 align-items-end mb-3">
+        <div class="col-auto">
+            <label class="form-label">Almacén</label>
+            <select class="form-select" @bind="selectedWarehouse">
+                @foreach (var w in warehouses)
+                {
+                    <option value="@w.Id">@w.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-auto">
+            <label class="form-label">Batching</label>
+            <select class="form-select" @bind="selectedBatching">
+                @foreach (var s in strategies.Batching)
+                {
+                    <option value="@s.Key">@s.DisplayName</option>
+                }
+            </select>
+        </div>
+        <div class="col-auto">
+            <label class="form-label">Routing</label>
+            <select class="form-select" @bind="selectedRouting">
+                @foreach (var s in strategies.Routing)
+                {
+                    <option value="@s.Key">@s.DisplayName</option>
+                }
+            </select>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" @onclick="RunAsync" disabled="@running">
+                @(running ? "Calculando…" : "Ejecutar")
+            </button>
+        </div>
+    </div>
+
+    @if (runError is not null)
+    {
+        <div class="alert alert-danger">
+            La ejecución falló: @runError
+            <div class="small text-muted">Sugerencia: las heurísticas marcadas como esqueleto aún no están implementadas.</div>
+        </div>
+    }
+
+    @if (result is not null)
+    {
+        <div class="row g-2 mb-3">
+            <div class="col-auto"><span class="badge bg-secondary">Lotes: @result.Metrics.BatchCount</span></div>
+            <div class="col-auto"><span class="badge bg-secondary">Distancia: @result.Metrics.TotalDistance.ToString("0.##")</span></div>
+            <div class="col-auto"><span class="badge bg-secondary">Duración est.: @result.Metrics.EstimatedDuration.ToString(@"hh\:mm\:ss")</span></div>
+            <div class="col-auto"><span class="badge bg-info text-dark">Cómputo: @result.Metrics.ComputeMs.ToString("0.##") ms</span></div>
+        </div>
+
+        <WarehouseMap Result="result" />
+    }
+}
+
+@code {
+    private IReadOnlyList<WarehouseSummary>? warehouses;
+    private StrategyCatalog? strategies;
+    private string? loadError, runError;
+
+    private Guid selectedWarehouse;
+    private string? selectedBatching, selectedRouting;
+
+    private bool running;
+    private SimulationResult? result;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            warehouses = await Api.GetWarehousesAsync();
+            strategies = await Api.GetStrategiesAsync();
+
+            selectedWarehouse = warehouses.FirstOrDefault()?.Id ?? Guid.Empty;
+            // Preselección de las heurísticas funcionales (caen al primero si no existen).
+            selectedBatching = Pick(strategies?.Batching, "random");
+            selectedRouting = Pick(strategies?.Routing, "s-shape");
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+        }
+    }
+
+    private static string? Pick(IReadOnlyList<StrategyInfo>? items, string preferredKey)
+        => items?.FirstOrDefault(s => s.Key == preferredKey)?.Key ?? items?.FirstOrDefault()?.Key;
+
+    private async Task RunAsync()
+    {
+        if (selectedBatching is null || selectedRouting is null) return;
+
+        running = true;
+        runError = null;
+        result = null;
+        try
+        {
+            var request = new PlanRequest(selectedWarehouse, selectedBatching, selectedRouting);
+            result = await Api.CreatePlanAsync(request);
+        }
+        catch (Exception ex)
+        {
+            runError = ex.Message;
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+}

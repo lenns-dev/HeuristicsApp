@@ -1,0 +1,64 @@
+@using System.Globalization
+
+@if (Result is null || !hasGeometry)
+{
+    <p class="text-muted"><em>No hay geometría que representar.</em></p>
+}
+else
+{
+    <svg viewBox="@viewBox" preserveAspectRatio="xMidYMid meet" role="img"
+         style="width:100%;max-height:70vh;border:1px solid #dee2e6;border-radius:.5rem;background:#fafafa">
+        <g transform="@flipTransform">
+            @foreach (var (batch, index) in Result.Batches.Select((b, i) => (b, i)))
+            {
+                var color = Palette[index % Palette.Length];
+                <polyline points="@ToPolyline(batch.Stops)" fill="none" stroke="@color"
+                          stroke-width="@stroke" stroke-linejoin="round" stroke-linecap="round" opacity="0.8" />
+                @foreach (var stop in batch.Stops)
+                {
+                    <circle cx="@Inv(stop.X)" cy="@Inv(stop.Y)" r="@pointRadius" fill="@color" />
+                }
+            }
+            <circle cx="@Inv(DepotX)" cy="@Inv(DepotY)" r="@depotRadius"
+                    fill="#111827" stroke="#fff" stroke-width="@stroke" />
+        </g>
+    </svg>
+}
+
+@code {
+    [Parameter] public SimulationResult? Result { get; set; }
+
+    private const double DepotX = 0, DepotY = 0;
+
+    private static readonly string[] Palette =
+        ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
+
+    private double minX, minY, maxX, maxY, span;
+    private bool hasGeometry;
+    private string viewBox = "", flipTransform = "", stroke = "", pointRadius = "", depotRadius = "";
+
+    protected override void OnParametersSet()
+    {
+        var points = Result?.Batches.SelectMany(b => b.Stops).ToList();
+        hasGeometry = points is { Count: > 0 };
+        if (!hasGeometry) return;
+
+        minX = points!.Min(p => p.X); maxX = points.Max(p => p.X);
+        minY = points.Min(p => p.Y); maxY = points.Max(p => p.Y);
+        span = Math.Max(Math.Max(maxX - minX, maxY - minY), 1);
+
+        var pad = span * 0.08;
+        viewBox = FormattableString.Invariant(
+            $"{minX - pad} {minY - pad} {(maxX - minX) + 2 * pad} {(maxY - minY) + 2 * pad}");
+        // scale(1,-1) refleja Y; el translate la reencuadra en [minY, maxY].
+        flipTransform = FormattableString.Invariant($"translate(0 {minY + maxY}) scale(1 -1)");
+        stroke = Inv(span * 0.006);
+        pointRadius = Inv(span * 0.010);
+        depotRadius = Inv(span * 0.020);
+    }
+
+    private static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static string ToPolyline(IReadOnlyList<RoutePoint> stops)
+        => string.Join(" ", stops.Select(p => FormattableString.Invariant($"{p.X},{p.Y}")));
+}

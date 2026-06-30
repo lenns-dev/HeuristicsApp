@@ -1,0 +1,11 @@
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\bin\Debug\net9.0\HeuristicsApp.Contracts.deps.json
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\bin\Debug\net9.0\HeuristicsApp.Contracts.dll
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\bin\Debug\net9.0\HeuristicsApp.Contracts.pdb
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\HeuristicsApp.Contracts.GeneratedMSBuildEditorConfig.editorconfig
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\HeuristicsApp.Contracts.AssemblyInfoInputs.cache
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\HeuristicsApp.Contracts.AssemblyInfo.cs
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\HeuristicsApp.Contracts.csproj.CoreCompileInputs.cache
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\HeuristicsApp.Contracts.dll
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\refint\HeuristicsApp.Contracts.dll
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\HeuristicsApp.Contracts.pdb
+C:\Git\HeuristicsApp\HeuristicsApp.Contracts\obj\Debug\net9.0\ref\HeuristicsApp.Contracts.dll
