@@ -9,51 +9,125 @@ else
     <svg viewBox="@viewBox" preserveAspectRatio="xMidYMid meet" role="img"
          style="width:100%;max-height:70vh;border:1px solid #dee2e6;border-radius:.5rem;background:#fafafa">
         <g transform="@flipTransform">
-            @foreach (var (batch, index) in Result.Batches.Select((b, i) => (b, i)))
+            @* Fondo: una banda vertical por pasillo (estanterías). *@
+            @foreach (var aisle in Result.Layout.Aisles)
             {
-                var color = Palette[index % Palette.Length];
+                <rect x="@Inv(aisle.X - bandWidth / 2)" y="@Inv(aisle.FrontY)"
+                      width="@Inv(bandWidth)" height="@Inv(aisle.BackY - aisle.FrontY)"
+                      fill="#e9edf2" stroke="#cbd5e1" stroke-width="@stroke" rx="@Inv(bandWidth * 0.12)" />
+            }
+
+            @* Rutas (trail). Clicables para aislar el lote; se atenúan según selección/animación. *@
+            @foreach (var batch in Result.Batches)
+            {
+                var color = ColorFor(batch.BatchId);
                 <polyline points="@ToPolyline(batch.Stops)" fill="none" stroke="@color"
-                          stroke-width="@stroke" stroke-linejoin="round" stroke-linecap="round" opacity="0.8" />
-                @foreach (var stop in batch.Stops)
+                          stroke-width="@stroke" stroke-linejoin="round" stroke-linecap="round"
+                          opacity="@RouteOpacity(batch.BatchId)" style="cursor:pointer"
+                          @onclick="() => OnBatchClicked.InvokeAsync(batch.BatchId)" />
+                @if (CurrentFrame is null && (SelectedBatchId is null || SelectedBatchId == batch.BatchId))
                 {
-                    <circle cx="@Inv(stop.X)" cy="@Inv(stop.Y)" r="@pointRadius" fill="@color" />
+                    @foreach (var stop in batch.Stops)
+                    {
+                        <circle cx="@Inv(stop.X)" cy="@Inv(stop.Y)" r="@pointRadius" fill="@color"
+                                opacity="@RouteOpacity(batch.BatchId)" pointer-events="none" />
+                    }
                 }
             }
-            <circle cx="@Inv(DepotX)" cy="@Inv(DepotY)" r="@depotRadius"
-                    fill="#111827" stroke="#fff" stroke-width="@stroke" />
+
+            @* Agentes en el instante actual. *@
+            @if (CurrentFrame is not null)
+            {
+                @foreach (var agent in CurrentFrame.Agents)
+                {
+                    <circle @key="agent.PickerId" cx="@Inv(agent.X)" cy="@Inv(agent.Y)" r="@agentRadius"
+                            fill="@ColorFor(agent.PickerId)" stroke="#ffffff" stroke-width="@stroke"
+                            opacity="@AgentOpacity(agent)" pointer-events="none" />
+                }
+            }
+
+            @* Depósito. *@
+            <circle cx="@Inv(Result.Layout.Depot.X)" cy="@Inv(Result.Layout.Depot.Y)" r="@depotRadius"
+                    fill="#111827" stroke="#fff" stroke-width="@stroke" pointer-events="none" />
         </g>
     </svg>
 }
 
 @code {
     [Parameter] public SimulationResult? Result { get; set; }
+    [Parameter] public SimulationFrame? CurrentFrame { get; set; }
+    [Parameter] public int? SelectedBatchId { get; set; }
+    [Parameter] public EventCallback<int> OnBatchClicked { get; set; }
 
-    private const double DepotX = 0, DepotY = 0;
-
-    private static readonly string[] Palette =
+    public static readonly string[] Palette =
         ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
-    private double minX, minY, maxX, maxY, span;
+    /// <summary>Color estable de un lote/agente. Fuente única compartida con la leyenda.</summary>
+    public static string ColorFor(int id) => Palette[Math.Abs(id) % Palette.Length];
+
+    private SimulationResult? _lastResult;
+    private double minX, minY, maxX, maxY, span, bandWidth;
     private bool hasGeometry;
-    private string viewBox = "", flipTransform = "", stroke = "", pointRadius = "", depotRadius = "";
+    private string viewBox = "", flipTransform = "", stroke = "", pointRadius = "", depotRadius = "", agentRadius = "";
+
+    // Opacidad de una ruta: resalta el lote aislado; si no hay selección, según animación.
+    private string RouteOpacity(int batchId)
+    {
+        if (SelectedBatchId is int sel)
+            return batchId == sel ? "0.95" : "0.07";
+        return CurrentFrame is null ? "0.85" : "0.25";
+    }
+
+    // Opacidad de un agente: atenúa los que no son del lote aislado.
+    private string AgentOpacity(AgentState agent)
+    {
+        if (SelectedBatchId is int sel && agent.PickerId != sel) return "0.12";
+        return agent.Action == "done" ? "0.4" : "1";
+    }
 
     protected override void OnParametersSet()
     {
-        var points = Result?.Batches.SelectMany(b => b.Stops).ToList();
-        hasGeometry = points is { Count: > 0 };
+        // La geometría (bbox, viewBox, radios) solo depende de Result: se recalcula
+        // una vez por plan, no en cada frame ni al cambiar de lote seleccionado.
+        if (ReferenceEquals(_lastResult, Result)) return;
+        _lastResult = Result;
+        Recompute();
+    }
+
+    private void Recompute()
+    {
+        if (Result is null) { hasGeometry = false; return; }
+
+        var aisles = Result.Layout.Aisles;
+        var stops = Result.Batches.SelectMany(b => b.Stops).ToList();
+        hasGeometry = aisles.Count > 0 || stops.Count > 0;
         if (!hasGeometry) return;
 
-        minX = points!.Min(p => p.X); maxX = points.Max(p => p.X);
-        minY = points.Min(p => p.Y); maxY = points.Max(p => p.Y);
+        var xs = aisles.Select(a => a.X).OrderBy(x => x).ToList();
+        var minStride = double.PositiveInfinity;
+        for (var i = 1; i < xs.Count; i++)
+            minStride = Math.Min(minStride, xs[i] - xs[i - 1]);
+
+        var px = new List<double>();
+        var py = new List<double>();
+        foreach (var a in aisles) { px.Add(a.X); py.Add(a.FrontY); py.Add(a.BackY); }
+        foreach (var s in stops) { px.Add(s.X); py.Add(s.Y); }
+        px.Add(Result.Layout.Depot.X); py.Add(Result.Layout.Depot.Y);
+
+        minX = px.Min(); maxX = px.Max();
+        minY = py.Min(); maxY = py.Max();
         span = Math.Max(Math.Max(maxX - minX, maxY - minY), 1);
+
+        bandWidth = double.IsInfinity(minStride) ? span * 0.05 : minStride * 0.55;
+        minX -= bandWidth / 2; maxX += bandWidth / 2;
 
         var pad = span * 0.08;
         viewBox = FormattableString.Invariant(
             $"{minX - pad} {minY - pad} {(maxX - minX) + 2 * pad} {(maxY - minY) + 2 * pad}");
-        // scale(1,-1) refleja Y; el translate la reencuadra en [minY, maxY].
         flipTransform = FormattableString.Invariant($"translate(0 {minY + maxY}) scale(1 -1)");
-        stroke = Inv(span * 0.006);
+        stroke = Inv(span * 0.004);
         pointRadius = Inv(span * 0.010);
+        agentRadius = Inv(span * 0.018);
         depotRadius = Inv(span * 0.020);
     }
 

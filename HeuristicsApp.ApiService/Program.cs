@@ -1,4 +1,5 @@
 using HeuristicsApp.ApiService.Mapping;
+using HeuristicsApp.ApiService.Simulation;
 using HeuristicsApp.ApiService.Warehouses;
 using HeuristicsApp.Core;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -26,6 +27,7 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, IRoutingStrategy>>(sp 
     sp.GetServices<IRoutingStrategy>().ToDictionary(s => s.Key));
 
 builder.Services.AddSingleton<OperationPlanner>();
+builder.Services.AddSingleton<RouteSimulator>();
 builder.Services.AddSingleton<IWarehouseProvider, FileWarehouseProvider>();
 
 var app = builder.Build();
@@ -54,6 +56,7 @@ app.MapPost("/plan", Results<Ok<SimulationResult>, ProblemHttpResult> (
     PlanRequest req,
     OperationPlanner planner,
     IWarehouseProvider warehouses,
+    RouteSimulator simulator,
     IReadOnlyDictionary<string, IBatchingStrategy> batching,
     IReadOnlyDictionary<string, IRoutingStrategy> routing,
     CancellationToken ct) =>
@@ -72,7 +75,7 @@ app.MapPost("/plan", Results<Ok<SimulationResult>, ProblemHttpResult> (
     var problem = loaded with { Pickers = req.Options?.Pickers ?? loaded.Pickers };
 
     var plan = planner.Build(problem, req.BatchingKey, req.RoutingKey, ct);
-    return TypedResults.Ok(plan.ToSimulationResult());
+    return TypedResults.Ok(plan.ToSimulationResult(problem.Layout, simulator));
 })
 .WithName("CreatePlan");
 

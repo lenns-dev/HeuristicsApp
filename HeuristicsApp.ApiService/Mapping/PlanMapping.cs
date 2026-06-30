@@ -1,3 +1,4 @@
+using HeuristicsApp.ApiService.Simulation;
 using HeuristicsApp.Core;
 
 namespace HeuristicsApp.ApiService.Mapping;
@@ -17,11 +18,19 @@ public static class PlanMapping
 
     public static SimulationResult ToSimulationResult(
         this OperationPlan plan,
+        WarehouseLayout layout,
+        RouteSimulator simulator,
         double pickerSpeed = DefaultPickerSpeed)
         => new(
+            Layout: layout.ToLayoutView(),
             Batches: plan.Routes.Select(ToBatchPlan).ToList(),
-            Frames: [], // TODO: generar con el simulador temporal (paso siguiente).
+            Frames: simulator.Simulate(plan.Routes, pickerSpeed),
             Metrics: plan.ToMetrics(pickerSpeed));
+
+    private static LayoutView ToLayoutView(this WarehouseLayout layout)
+        => new(
+            Depot: new RoutePoint(layout.Depot.X, layout.Depot.Y),
+            Aisles: layout.Aisles.Select(a => new AisleView(a.Id, a.X, a.FrontY, a.BackY)).ToList());
 
     private static BatchPlan ToBatchPlan(PickRoute route)
         => new(
