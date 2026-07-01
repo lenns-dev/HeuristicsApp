@@ -18,6 +18,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddSingleton<IBatchingStrategy, SeedBatching>();
 builder.Services.AddSingleton<IBatchingStrategy, SavingsBatching>();
 builder.Services.AddSingleton<IBatchingStrategy, RandomBatching>();
+builder.Services.AddSingleton<IBatchingStrategy, BasicConstructiveBatching>();
+
 builder.Services.AddSingleton<IRoutingStrategy, SShapeRouting>();
 builder.Services.AddSingleton<IRoutingStrategy, LargestGapRouting>();
 
