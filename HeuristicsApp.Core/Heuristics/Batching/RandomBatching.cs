@@ -1,14 +1,14 @@
 namespace HeuristicsApp.Core;
 
 /// <summary>
-/// Batching aleatorio (baseline): baraja los pedidos con una semilla fija y los
+/// Batching aleatorio: baraja los pedidos con una semilla fija y los
 /// empaqueta en orden respetando la capacidad del picker. No optimiza nada; sirve
 /// como punto de comparación y para ejercitar el resto del pipeline.
 /// </summary>
 public sealed class RandomBatching(int seed = 42) : IBatchingStrategy
 {
     public string Key => "random";
-    public string DisplayName => "Random (baseline)";
+    public string DisplayName => "Random";
 
     public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, CancellationToken ct)
     {

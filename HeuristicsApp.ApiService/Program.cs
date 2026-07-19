@@ -19,9 +19,11 @@ builder.Services.AddSingleton<IBatchingStrategy, SeedBatching>();
 builder.Services.AddSingleton<IBatchingStrategy, SavingsBatching>();
 builder.Services.AddSingleton<IBatchingStrategy, RandomBatching>();
 builder.Services.AddSingleton<IBatchingStrategy, BasicConstructiveBatching>();
+//builder.Services.AddSingleton<IBatchingStrategy, BasicConstructiveBatching>(sp => new BasicConstructiveBatching(compact: false));
+builder.Services.AddSingleton<IBatchingStrategy, CWSavingConstructiveBatching>(sp => new CWSavingConstructiveBatching(sp.GetRequiredService<IRoutingStrategy>()));
 
 builder.Services.AddSingleton<IRoutingStrategy, SShapeRouting>();
-builder.Services.AddSingleton<IRoutingStrategy, LargestGapRouting>();
+//builder.Services.AddSingleton<IRoutingStrategy, LargestGapRouting>();
 
 builder.Services.AddSingleton<IReadOnlyDictionary<string, IBatchingStrategy>>(sp =>
     sp.GetServices<IBatchingStrategy>().ToDictionary(s => s.Key));
