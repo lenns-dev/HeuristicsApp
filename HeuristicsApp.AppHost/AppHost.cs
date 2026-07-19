@@ -18,7 +18,9 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 #region Docker
 
-// dotnet run --project HeuristicsApp.AppHost -- --publisher docker-compose --output-path ./artifacts
+// Comando para exportar el proyecto a docker-compose/artifacts:
+
+// $ dotnet run --project HeuristicsApp.AppHost -- --publisher docker-compose --output-path ./artifacts
 
 var compose = builder.AddDockerComposeEnvironment("compose")
     .WithDashboard(dashboard =>
