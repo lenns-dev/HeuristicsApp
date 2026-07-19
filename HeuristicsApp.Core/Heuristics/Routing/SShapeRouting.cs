@@ -23,16 +23,18 @@ public sealed class SShapeRouting : IRoutingStrategy
 
         var depot = layout.Depot;
 
-        // Sin artículos localizables -> ruta trivial en el depósito.
+        // Sin artículos localizables -> ruta trivial
         if (picksByAisle.Count == 0)
             return new PickRoute(batch, [depot], 0);
 
-        // 2) Ordenar los pasillos visitados por X (orden físico izq. -> der.).
+        // Ordenar los pasillos visitados por X (orden físico izq. -> der.).
         var aisleXById = layout.Aisles.ToDictionary(a => a.Id, a => a.X);
         var backY = layout.Aisles.Count > 0 ? layout.Aisles.Max(a => a.BackY) : 0d;
         var visited = picksByAisle.Keys.OrderBy(id => aisleXById.GetValueOrDefault(id)).ToList();
 
-        // 3) Serpentear: un pasillo de frente->fondo, el siguiente de fondo->frente.
+        // Serpentear: un pasillo de frente->fondo, el siguiente de fondo->frente.
+        // Los segmentos entre pasillos son siempre horizontales (mismo Y),
+        // lo que representa el recorrido por el cross-aisle.
         var stops = new List<Coordinate> { depot };
         var goingUp = true;
 
@@ -45,23 +47,29 @@ public sealed class SShapeRouting : IRoutingStrategy
 
             if (goingUp)
             {
-                stops.Add(new Coordinate(x, 0));                  // entra por el frente
+                stops.Add(new Coordinate(x, depot.Y));           // entra por el frontal
                 foreach (var p in picks.OrderBy(p => p.Position.Y))
                     stops.Add(p.Position);
-                stops.Add(new Coordinate(x, backY));             // sale por el fondo
+                stops.Add(new Coordinate(x, backY));             // sale por el trasero
             }
             else
             {
-                stops.Add(new Coordinate(x, backY));             // entra por el fondo
+                stops.Add(new Coordinate(x, backY));             // entra por el trasero
                 foreach (var p in picks.OrderByDescending(p => p.Position.Y))
                     stops.Add(p.Position);
-                stops.Add(new Coordinate(x, 0));                 // sale por el frente
+                stops.Add(new Coordinate(x, depot.Y));           // sale por el frontal
             }
 
             goingUp = !goingUp;
         }
 
-        // 4) Regreso al depósito y distancia total (métrica del layout).
+        // Regreso al depósito vía cross-aisle si es necesario.
+        // Si el último exit fue en backY (número impar de pasillos visitados),
+        // hay que recorrer el cross-aisle trasero hasta la columna del depósito
+        // antes de bajar: corrije la diagonal visual que cruza todo el almacén.
+        var lastExit = stops[^1];
+        if (lastExit.Y != depot.Y)
+            stops.Add(new Coordinate(depot.X, lastExit.Y)); // cross-aisle trasero -> columna depósito
         stops.Add(depot);
 
         var distance = 0d;
