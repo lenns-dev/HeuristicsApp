@@ -21,6 +21,8 @@ builder.Services.AddSingleton<IBatchingStrategy, CWSavingConstructiveBatching>(s
 
 builder.Services.AddSingleton<IRoutingStrategy, SShapeRouting>();
 builder.Services.AddSingleton<IRoutingStrategy, RatliffRosenthalRouting>();
+builder.Services.AddSingleton<IRoutingStrategy, CombinedRouting>();
+builder.Services.AddSingleton<IRoutingStrategy, LargestGapRouting>();
 
 builder.Services.AddSingleton<IReadOnlyDictionary<string, IBatchingStrategy>>(sp =>
     sp.GetServices<IBatchingStrategy>().ToDictionary(s => s.Key));
