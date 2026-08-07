@@ -20,6 +20,7 @@ builder.Services.AddSingleton<IBatchingStrategy, BasicConstructiveBatching>();
 builder.Services.AddSingleton<IBatchingStrategy, CWSavingConstructiveBatching>(sp => new CWSavingConstructiveBatching(sp.GetRequiredService<IRoutingStrategy>()));
 
 builder.Services.AddSingleton<IRoutingStrategy, SShapeRouting>();
+builder.Services.AddSingleton<IRoutingStrategy, RatliffRosenthalRouting>();
 
 builder.Services.AddSingleton<IReadOnlyDictionary<string, IBatchingStrategy>>(sp =>
     sp.GetServices<IBatchingStrategy>().ToDictionary(s => s.Key));
