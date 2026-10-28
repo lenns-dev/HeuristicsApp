@@ -1,6 +1,9 @@
 ﻿<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="">HeuristicsApp</a>
+        <a class="navbar-brand d-flex align-items-center gap-2" href="">
+            <span class="brand-logo"><img src="@Assets["logos/etsisi_1024x1024.png"]" alt="Logo ETSISI" /></span>
+            Simulador Heurístico
+        </a>
     </div>
 </div>
 
@@ -10,33 +13,30 @@
     <nav class="nav flex-column">
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill" aria-hidden="true"></span> Home
+                <span class="bi bi-house-door-fill" aria-hidden="true"></span> Guía de uso
             </NavLink>
         </div>
-
-        @* 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
-
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="planner">
-                <span class="bi bi-diagram-3-fill" aria-hidden="true"></span> Planner
+                <span class="bi bi-plus-square-fill" aria-hidden="true"></span> Planificador
             </NavLink>
         </div>
-        *@
 
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="planner">
-                <span class="bi bi-plus-square-fill" aria-hidden="true"></span> Heuristic Planner
+            <NavLink class="nav-link" href="instancias">
+                <span class="bi bi-cloud-download" aria-hidden="true"></span> Instancias
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="docs">
+                <span class="bi bi-list-nested" aria-hidden="true"></span> Documentación
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="docker">
+                <span class="bi bi-box" aria-hidden="true"></span> Docker
             </NavLink>
         </div>
     </nav>
