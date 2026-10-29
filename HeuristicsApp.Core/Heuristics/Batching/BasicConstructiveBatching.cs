@@ -10,7 +10,7 @@ public sealed class BasicConstructiveBatching(bool compact = true) : IBatchingSt
     public string Key => "basicConstructive";
     public string DisplayName => "Basic Constructive";
 
-    public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, CancellationToken ct)
+    public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, IRoutingStrategy routing, CancellationToken ct)
     {
         var orders = problem.Orders.ToList();
         var cap = problem.Capacity;

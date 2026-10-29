@@ -10,7 +10,7 @@ public sealed class RandomBatching(int seed = 42) : IBatchingStrategy
     public string Key => "random";
     public string DisplayName => "Random";
 
-    public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, CancellationToken ct)
+    public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, IRoutingStrategy routing, CancellationToken ct)
     {
         var rng = new Random(seed);
         var shuffled = problem.Orders.OrderBy(_ => rng.Next()).ToList();

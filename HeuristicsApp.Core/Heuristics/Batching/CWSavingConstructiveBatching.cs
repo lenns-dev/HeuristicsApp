@@ -4,21 +4,22 @@
 /// Heurística constructiva Clarke-Wright Savings para batching: inicializa un lote
 /// por pedido y los fusiona iterativamente eligiendo siempre la pareja cuya unión
 /// produce el mayor ahorro en coste de routing, respetando la capacidad del picker.
+/// El coste se mide con el routing elegido para el plan, el mismo que se usa después.
 /// </summary>
-public sealed class CWSavingConstructiveBatching(IRoutingStrategy routing) : IBatchingStrategy
+public sealed class CWSavingConstructiveBatching : IBatchingStrategy
 {
     public string Key => "cwSavingConstructive";
     public string DisplayName => "CW Saving Constructive";
 
-    public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, CancellationToken ct)
+    public IReadOnlyList<Batch> CreateBatches(WarehouseProblem problem, IRoutingStrategy routing, CancellationToken ct)
     {
         var orders = problem.Orders.ToList();
         if (orders.Count == 0) return [];
 
-        return ApplyClarkeAndWright(orders, problem, ct);
+        return ApplyClarkeAndWright(orders, problem, routing, ct);
     }
 
-    private List<Batch> ApplyClarkeAndWright(List<Order> initialOrders, WarehouseProblem problem, CancellationToken ct)
+    private static List<Batch> ApplyClarkeAndWright(List<Order> initialOrders, WarehouseProblem problem, IRoutingStrategy routing, CancellationToken ct)
     {
         if (initialOrders.Count == 1)
             return [new Batch(0, initialOrders)];
@@ -37,7 +38,7 @@ public sealed class CWSavingConstructiveBatching(IRoutingStrategy routing) : IBa
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var updated = CombineBestBatches(batches, problem, ct);
+            var updated = CombineBestBatches(batches, problem, routing, ct);
             if (updated is null) break;
             batches = updated;
         }
@@ -45,7 +46,7 @@ public sealed class CWSavingConstructiveBatching(IRoutingStrategy routing) : IBa
         return batches.Select((b, i) => new Batch(i, b.Orders)).ToList();
     }
 
-    private List<Batch>? CombineBestBatches(List<Batch> batches, WarehouseProblem problem, CancellationToken ct)
+    private static List<Batch>? CombineBestBatches(List<Batch> batches, WarehouseProblem problem, IRoutingStrategy routing, CancellationToken ct)
     {
         Batch? bestA = null, bestB = null;
         double bestSaving = double.MinValue;
