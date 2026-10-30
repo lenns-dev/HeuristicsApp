@@ -18,4 +18,5 @@ public sealed record WarehouseProblem(
     WarehouseLayout Layout,
     IReadOnlyList<Order> Orders,
     PickerCapacity Capacity,
-    int Pickers);
+    int Pickers,
+    PickerTiming Timing);

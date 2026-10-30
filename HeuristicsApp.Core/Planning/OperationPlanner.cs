@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace HeuristicsApp.Core;
 
@@ -13,10 +13,11 @@ public sealed class OperationPlanner(
         CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        var batches = batching[batchingKey].CreateBatches(problem, ct);
-        var routes  = batches.Select(b => routing[routingKey].Route(b, problem.Layout, ct)).ToList();
+        var router  = routing[routingKey];
+        var batches = batching[batchingKey].CreateBatches(problem, router, ct);
+        var routes  = batches.Select(b => router.Route(b, problem.Layout, ct)).ToList();
         sw.Stop();
 
-        return OperationPlan.From(routes, computeTime: sw.Elapsed);
+        return OperationPlan.From(routes, problem.Pickers, problem.Timing, computeTime: sw.Elapsed);
     }
 }
