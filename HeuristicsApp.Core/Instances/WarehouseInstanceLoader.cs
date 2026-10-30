@@ -41,7 +41,8 @@ public static class WarehouseInstanceLoader
             Layout: layout,
             Orders: orders,
             Capacity: new PickerCapacity((int)Math.Round(layoutDto.WorkerCapacity), layoutDto.WorkerCapacity),
-            Pickers: 1);
+            Pickers: 1,
+            Timing: PickerTiming.From(layoutDto.TravelSpeed, layoutDto.PickingTime));
     }
 
     private static WarehouseLayout BuildLayout(LayoutDto layout, OrdersDto orders)
@@ -69,7 +70,16 @@ public static class WarehouseInstanceLoader
                 locations[sku] = new StorageLocation(sku, p.Aisle, new Coordinate(AisleX(p.Aisle), p.HeightPosition));
         }
 
-        return new WarehouseLayout(new Coordinate(0, 0), aisles, locations);
+        // Ancho: cada pasillo con su bloque de estantería, más el bloque exterior del último
+        // (estantería | pasillo | estantería | ... | pasillo | estantería).
+        var dimensions = new WarehouseDimensions(
+            Width: layout.NumberOfAisles * stride + layout.ShelfWidth,
+            Length: layout.ShelfLength,
+            AisleSpacing: stride,
+            AisleWidth: layout.AisleWidth,
+            ShelfWidth: layout.ShelfWidth);
+
+        return new WarehouseLayout(new Coordinate(0, 0), aisles, locations, dimensions);
     }
 
     private static IReadOnlyList<Order> BuildOrders(OrdersDto orders)
