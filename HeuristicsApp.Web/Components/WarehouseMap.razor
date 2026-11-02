@@ -9,6 +9,13 @@ else
     <svg viewBox="@viewBox" preserveAspectRatio="xMidYMid meet" role="img"
          style="width:100%;max-height:70vh;border:1px solid #dee2e6;border-radius:.5rem;background:#fafafa">
         <g transform="@flipTransform">
+            @* Contorno del almacén (pasillos + estanterías exteriores), referencia de las cotas. *@
+            @if (footprint is { } fp)
+            {
+                <rect x="@Inv(fp.X)" y="@Inv(fp.Y)" width="@Inv(fp.W)" height="@Inv(fp.H)" fill="none"
+                      stroke="#94a3b8" stroke-width="@stroke" stroke-dasharray="@dimDash" pointer-events="none" />
+            }
+
             @* Fondo: una banda vertical por pasillo (estanterías). *@
             @foreach (var aisle in Result.Layout.Aisles)
             {
@@ -25,13 +32,21 @@ else
                           stroke-width="@stroke" stroke-linejoin="round" stroke-linecap="round"
                           opacity="@RouteOpacity(batch.BatchId)" style="cursor:pointer"
                           @onclick="() => OnBatchClicked.InvokeAsync(batch.BatchId)" />
-                @if (CurrentFrame is null && (SelectedBatchId is null || SelectedBatchId == batch.BatchId))
+            }
+
+            @* Artículos de los lotes visibles (todos, o solo el aislado): hueco = pendiente, relleno = recogido. *@
+            @foreach (var batch in Result.Batches.Where(b => IsVisible(b.BatchId)))
+            {
+                var color = ColorFor(batch.BatchId);
+                @foreach (var item in batch.Items)
                 {
-                    @foreach (var stop in batch.Stops)
-                    {
-                        <circle cx="@Inv(stop.X)" cy="@Inv(stop.Y)" r="@pointRadius" fill="@color"
-                                opacity="@RouteOpacity(batch.BatchId)" pointer-events="none" />
-                    }
+                    var picked = IsPicked(item);
+                    <rect x="@Inv(item.X - itemSize / 2)" y="@Inv(item.Y - itemSize / 2)"
+                          width="@Inv(itemSize)" height="@Inv(itemSize)" rx="@Inv(itemSize * 0.2)"
+                          fill="@(picked ? color : "#ffffff")" stroke="@color" stroke-width="@stroke"
+                          style="cursor:pointer" @onclick="() => OnBatchClicked.InvokeAsync(batch.BatchId)">
+                        <title>@ItemTitle(batch, item, picked)</title>
+                    </rect>
                 }
             }
 
@@ -41,7 +56,7 @@ else
                 @foreach (var agent in CurrentFrame.Agents)
                 {
                     <circle @key="agent.PickerId" cx="@Inv(agent.X)" cy="@Inv(agent.Y)" r="@agentRadius"
-                            fill="@ColorFor(agent.PickerId)" stroke="#ffffff" stroke-width="@stroke"
+                            fill="@ColorFor(agent.BatchId)" stroke="#ffffff" stroke-width="@stroke"
                             opacity="@AgentOpacity(agent)" pointer-events="none" />
                 }
             }
@@ -50,13 +65,42 @@ else
             <circle cx="@Inv(Result.Layout.Depot.X)" cy="@Inv(Result.Layout.Depot.Y)" r="@depotRadius"
                     fill="#111827" stroke="#fff" stroke-width="@stroke" pointer-events="none" />
         </g>
+
+        @* Cotas en coordenadas de pantalla (fuera del grupo volteado, para que el texto no salga invertido). *@
+        @if (dims.Count > 0)
+        {
+            <defs>
+                <marker id="dim-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="5" markerHeight="5"
+                        orient="auto-start-reverse">
+                    <path d="M0,0 L10,5 L0,10 z" fill="#64748b" />
+                </marker>
+            </defs>
+            <g pointer-events="none" font-family="system-ui, sans-serif" font-size="@Inv(dimFont)">
+                @foreach (var d in dims)
+                {
+                    <g>
+                    @foreach (var e in d.Extensions)
+                    {
+                        <line x1="@Inv(e.X1)" y1="@Inv(Sy(e.Y1))" x2="@Inv(e.X2)" y2="@Inv(Sy(e.Y2))"
+                              stroke="#94a3b8" stroke-width="@stroke" />
+                    }
+                    <line x1="@Inv(d.X1)" y1="@Inv(Sy(d.Y1))" x2="@Inv(d.X2)" y2="@Inv(Sy(d.Y2))"
+                          stroke="#64748b" stroke-width="@stroke" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)" />
+                    <text x="@Inv(d.LabelX)" y="@Inv(Sy(d.LabelY))" transform="@LabelTransform(d)"
+                          text-anchor="middle" dominant-baseline="central" fill="#334155"
+                          stroke="#fafafa" stroke-width="@Inv(dimFont * 0.3)" paint-order="stroke">@d.Label</text>
+                    </g>
+                }
+            </g>
+        }
     </svg>
 }
 
 @code {
     [Parameter] public SimulationResult? Result { get; set; }
     [Parameter] public SimulationFrame? CurrentFrame { get; set; }
-    [Parameter] public int? SelectedBatchId { get; set; }
+    /// <summary>Lotes a resaltar (null = todos): el aislado a mano o los activos en modo automático.</summary>
+    [Parameter] public IReadOnlyCollection<int>? VisibleBatchIds { get; set; }
     [Parameter] public EventCallback<int> OnBatchClicked { get; set; }
 
     public static readonly string[] Palette =
@@ -66,22 +110,41 @@ else
     public static string ColorFor(int id) => Palette[Math.Abs(id) % Palette.Length];
 
     private SimulationResult? _lastResult;
-    private double minX, minY, maxX, maxY, span, bandWidth;
+    private double minX, minY, maxX, maxY, span, bandWidth, itemSize;
     private bool hasGeometry;
-    private string viewBox = "", flipTransform = "", stroke = "", pointRadius = "", depotRadius = "", agentRadius = "";
+    private string viewBox = "", flipTransform = "", stroke = "", depotRadius = "", agentRadius = "";
+
+    // Cotas del almacén, en coordenadas del mundo (Sy las pasa a pantalla).
+    private sealed record DimLine(
+        double X1, double Y1, double X2, double Y2,
+        string Label, double LabelX, double LabelY, bool Vertical,
+        IReadOnlyList<(double X1, double Y1, double X2, double Y2)> Extensions);
+
+    private List<DimLine> dims = [];
+    private (double X, double Y, double W, double H)? footprint;
+    private double flipSum, dimFont;
+    private string dimDash = "";
+
+    // Y de pantalla equivalente a flipTransform (translate(0, minY+maxY) scale(1,-1)).
+    private double Sy(double y) => flipSum - y;
+
+    private string? LabelTransform(DimLine d)
+        => d.Vertical ? $"rotate(-90 {Inv(d.LabelX)} {Inv(Sy(d.LabelY))})" : null;
 
     // Opacidad de una ruta: resalta el lote aislado; si no hay selección, según animación.
     private string RouteOpacity(int batchId)
     {
-        if (SelectedBatchId is int sel)
-            return batchId == sel ? "0.95" : "0.07";
+        if (VisibleBatchIds is not null)
+            return IsVisible(batchId) ? "0.95" : "0.07";
         return CurrentFrame is null ? "0.85" : "0.25";
     }
+
+    private bool IsVisible(int batchId) => VisibleBatchIds is null || VisibleBatchIds.Contains(batchId);
 
     // Opacidad de un agente: atenúa los que no son del lote aislado.
     private string AgentOpacity(AgentState agent)
     {
-        if (SelectedBatchId is int sel && agent.PickerId != sel) return "0.12";
+        if (!IsVisible(agent.BatchId)) return "0.12";
         return agent.Action == "done" ? "0.4" : "1";
     }
 
@@ -121,14 +184,83 @@ else
         bandWidth = double.IsInfinity(minStride) ? span * 0.05 : minStride * 0.55;
         minX -= bandWidth / 2; maxX += bandWidth / 2;
 
+        ComputeDimensions(xs);
+
         var pad = span * 0.08;
         viewBox = FormattableString.Invariant(
             $"{minX - pad} {minY - pad} {(maxX - minX) + 2 * pad} {(maxY - minY) + 2 * pad}");
-        flipTransform = FormattableString.Invariant($"translate(0 {minY + maxY}) scale(1 -1)");
+        flipSum = minY + maxY;
+        flipTransform = FormattableString.Invariant($"translate(0 {flipSum}) scale(1 -1)");
         stroke = Inv(span * 0.004);
-        pointRadius = Inv(span * 0.010);
+        itemSize = span * 0.016;
         agentRadius = Inv(span * 0.018);
         depotRadius = Inv(span * 0.020);
+    }
+
+    // Contorno y cotas (ancho, largo y distancia entre ejes de pasillos), ampliando el bbox para que quepan.
+    private void ComputeDimensions(IReadOnlyList<double> aisleXs)
+    {
+        dims = [];
+        footprint = null;
+        var d = Result?.Layout.Dimensions;
+        if (d is null || aisleXs.Count == 0) return;
+
+        var aisles = Result!.Layout.Aisles;
+        var left = aisleXs[0] - d.AisleWidth / 2 - d.ShelfWidth;
+        var right = aisleXs[^1] + d.AisleWidth / 2 + d.ShelfWidth;
+        var front = aisles.Min(a => a.FrontY);
+        var back = aisles.Max(a => a.BackY);
+        footprint = (left, front, right - left, back - front);
+
+        dimFont = span * 0.028;
+        dimDash = Inv(span * 0.012);
+        var off = span * 0.07;       // distancia del objeto a la línea de cota
+        var gap = span * 0.01;       // hueco entre objeto y línea de extensión
+        var labelGap = dimFont * 1.1;
+
+        // Ancho, bajo el frontal.
+        var yW = front - off;
+        dims.Add(new DimLine(left, yW, right, yW, $"Ancho {Fmt(d.Width)}", (left + right) / 2, yW - labelGap, false,
+            [(left, front - gap, left, yW - gap), (right, front - gap, right, yW - gap)]));
+
+        // Largo, a la derecha.
+        var xL = right + off;
+        dims.Add(new DimLine(xL, front, xL, back, $"Largo {Fmt(d.Length)}", xL + labelGap, (front + back) / 2, true,
+            [(right + gap, front, xL + gap, front), (right + gap, back, xL + gap, back)]));
+
+        // Distancia entre ejes de los dos primeros pasillos, sobre el fondo.
+        var top = back;
+        if (aisleXs.Count > 1)
+        {
+            top = back + off;
+            dims.Add(new DimLine(aisleXs[0], top, aisleXs[1], top, $"Entre pasillos {Fmt(d.AisleSpacing)}",
+                (aisleXs[0] + aisleXs[1]) / 2, top + labelGap, false,
+                [(aisleXs[0], back + gap, aisleXs[0], top + gap), (aisleXs[1], back + gap, aisleXs[1], top + gap)]));
+        }
+
+        // Ampliar el bbox: contorno, líneas y etiquetas (ancho de texto aproximado).
+        minX = Math.Min(minX, left);
+        maxX = Math.Max(maxX, xL + labelGap + dimFont);
+        minY = Math.Min(minY, yW - labelGap - dimFont);
+        maxY = Math.Max(maxY, top + labelGap + dimFont);
+        foreach (var dim in dims.Where(x => !x.Vertical))
+        {
+            var half = dim.Label.Length * dimFont * 0.3;
+            minX = Math.Min(minX, dim.LabelX - half);
+            maxX = Math.Max(maxX, dim.LabelX + half);
+        }
+    }
+
+    private static string Fmt(double v) => v.ToString("0.##");
+
+    // Recogido si el picker ya ha pasado por su ubicación en el instante mostrado.
+    private bool IsPicked(PickItem item)
+        => CurrentFrame is not null && item.PickedAtSeconds is double t && t <= CurrentFrame.TimestampSeconds;
+
+    private static string ItemTitle(BatchPlan batch, PickItem item, bool picked)
+    {
+        var when = item.PickedAtSeconds is double t ? TimeSpan.FromSeconds(t).ToString(@"hh\:mm\:ss") : "?";
+        return $"SKU {item.Sku} · lote {batch.BatchId} · {(picked ? "recogido" : "pendiente")} (recogida a las {when})";
     }
 
     private static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
