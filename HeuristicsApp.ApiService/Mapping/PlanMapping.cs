@@ -10,39 +10,49 @@ namespace HeuristicsApp.ApiService.Mapping;
 /// </summary>
 public static class PlanMapping
 {
-    /// <summary>
-    /// Velocidad de referencia del picker (unidades de layout por segundo).
-    /// Placeholder hasta tener un modelo de tiempos propio en el dominio.
-    /// </summary>
-    private const double DefaultPickerSpeed = 1.2;
-
     public static SimulationResult ToSimulationResult(
         this OperationPlan plan,
         WarehouseLayout layout,
-        RouteSimulator simulator,
-        double pickerSpeed = DefaultPickerSpeed)
-        => new(
+        RouteSimulator simulator)
+    {
+        // Una línea temporal por lote (recorrido + paradas de recogida), compartida por lotes y tracks.
+        var timelines = plan.Assignments
+            .Select(a => (Assignment: a, Timeline: simulator.Simulate(a, layout, plan.Timing)))
+            .ToList();
+
+        return new(
             Layout: layout.ToLayoutView(),
-            Batches: plan.Routes.Select(ToBatchPlan).ToList(),
-            Frames: simulator.Simulate(plan.Routes, pickerSpeed),
-            Metrics: plan.ToMetrics(pickerSpeed));
+            Batches: timelines.OrderBy(x => x.Assignment.Route.Batch.Id).Select(x => x.Assignment.ToBatchPlan(x.Timeline)).ToList(),
+            Tracks: simulator.BuildTracks(timelines),
+            Metrics: plan.ToMetrics());
+    }
 
     private static LayoutView ToLayoutView(this WarehouseLayout layout)
         => new(
             Depot: new RoutePoint(layout.Depot.X, layout.Depot.Y),
-            Aisles: layout.Aisles.Select(a => new AisleView(a.Id, a.X, a.FrontY, a.BackY)).ToList());
+            Aisles: layout.Aisles.Select(a => new AisleView(a.Id, a.X, a.FrontY, a.BackY)).ToList(),
+            Dimensions: layout.Dimensions is { } d
+                ? new LayoutDimensions(d.Width, d.Length, d.AisleSpacing, d.AisleWidth, d.ShelfWidth)
+                : null);
 
-    private static BatchPlan ToBatchPlan(PickRoute route)
+    private static BatchPlan ToBatchPlan(this PickerAssignment assignment, BatchTimeline timeline)
         => new(
-            BatchId: route.Batch.Id,
-            OrderCount: route.Batch.Orders.Count,
-            Distance: route.Distance,
-            Stops: route.Stops.Select(s => new RoutePoint(s.X, s.Y)).ToList());
+            BatchId: assignment.Route.Batch.Id,
+            PickerId: assignment.PickerId,
+            OrderCount: assignment.Route.Batch.Orders.Count,
+            Distance: assignment.Route.Distance,
+            StartSeconds: assignment.StartTime,
+            Stops: assignment.Route.Stops.Select(s => new RoutePoint(s.X, s.Y)).ToList(),
+            Items: timeline.Items);
 
-    private static PlanMetrics ToMetrics(this OperationPlan plan, double pickerSpeed)
+    private static PlanMetrics ToMetrics(this OperationPlan plan)
         => new(
             TotalDistance: plan.TotalDistance,
-            EstimatedDuration: TimeSpan.FromSeconds(plan.TotalDistance / pickerSpeed),
+            // Duración real con K pickers en paralelo: lo que tarda el último en terminar.
+            EstimatedDuration: TimeSpan.FromSeconds(plan.Makespan),
             BatchCount: plan.BatchCount,
-            ComputeMs: plan.ComputeTime.TotalMilliseconds);
+            PickerCount: plan.Pickers,
+            ComputeMs: plan.ComputeTime.TotalMilliseconds,
+            TravelSpeed: plan.Timing.TravelSpeed,
+            PickTimePerItem: plan.Timing.PickTimePerItem);
 }
