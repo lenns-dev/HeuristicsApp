@@ -51,7 +51,11 @@ else
             </select>
         </div>
         <div class="col-auto">
-            <button class="btn btn-primary" @onclick="RunAsync" disabled="@running">
+            <label class="form-label">Pickers</label>
+            <input type="number" class="form-control" style="width:6rem" min="1" step="1" @bind="pickers" />
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" @onclick="RunAsync" disabled="@(running || selectedWarehouse == Guid.Empty)">
                 @(running ? "Calculando…" : "Ejecutar")
             </button>
         </div>
@@ -69,39 +73,65 @@ else
     {
         <div class="row g-2 mb-3">
             <div class="col-auto"><span class="badge bg-secondary">Lotes: @result.Metrics.BatchCount</span></div>
+            <div class="col-auto"><span class="badge bg-secondary">Pickers: @result.Metrics.PickerCount</span></div>
             <div class="col-auto"><span class="badge bg-secondary">Distancia: @result.Metrics.TotalDistance.ToString("0.##")</span></div>
+            <div class="col-auto">
+                <span class="badge bg-light text-dark border"
+                      title="Definido por la instancia: velocidad de desplazamiento y tiempo de parada por artículo recogido">
+                    Velocidad @result.Metrics.TravelSpeed.ToString("0.##") · Recogida @result.Metrics.PickTimePerItem.ToString("0.##") s/art.
+                </span>
+            </div>
             <div class="col-auto"><span class="badge bg-secondary">Duración est.: @result.Metrics.EstimatedDuration.ToString(@"hh\:mm\:ss")</span></div>
+            @if (result.Layout.Dimensions is { } dim)
+            {
+                <div class="col-auto">
+                    <span class="badge bg-light text-dark border"
+                          title="@($"Ancho de pasillo {dim.AisleWidth:0.##} · ancho de estantería {dim.ShelfWidth:0.##} · {result.Layout.Aisles.Count} pasillos")">
+                        Almacén: @dim.Width.ToString("0.##") × @dim.Length.ToString("0.##") · entre pasillos @dim.AisleSpacing.ToString("0.##")
+                    </span>
+                </div>
+            }
             <div class="col-auto"><span class="badge bg-info text-dark">Cómputo: @result.Metrics.ComputeMs.ToString("0.##") ms</span></div>
         </div>
 
-        @if (result.Frames.Count > 0)
+        @if (result.Tracks.Count > 0)
         {
             <div class="d-flex align-items-center gap-2 mb-2">
                 <button class="btn btn-sm btn-outline-primary" style="min-width:6rem" @onclick="TogglePlay">
                     @(playing ? "⏸ Pausa" : "▶ Play")
                 </button>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="Reset">⏮ Reinicio</button>
-                <input type="range" class="form-range flex-grow-1" min="0" max="@(result.Frames.Count - 1)"
-                       @bind="frameIndex" @bind:event="oninput" />
-                <span class="text-muted small text-nowrap" style="min-width:6ch">t = @CurrentTime.ToString("0.0")s</span>
+                <select class="form-select form-select-sm" style="width:auto" title="Velocidad de reproducción"
+                        @bind="speed">
+                    @foreach (var s in Speeds)
+                    {
+                        <option value="@s">x@(s)</option>
+                    }
+                </select>
+                <input type="range" class="form-range flex-grow-1" min="0" max="@((int)Math.Ceiling(Duration))" step="1"
+                       @bind="SliderSeconds" @bind:event="oninput" />
+                <span class="text-muted small text-nowrap" style="font-variant-numeric:tabular-nums">
+                    @FormatTime(currentTime) / @FormatTime(Duration)
+                </span>
             </div>
         }
 
+        var visible = VisibleBatchIds;
         @if (result.Batches.Count > 1)
         {
             <div class="d-flex flex-wrap align-items-center gap-1 mb-2" style="max-height:7rem;overflow-y:auto">
                 <span class="me-1 text-muted small">Lotes:</span>
-                <button type="button" class="btn btn-sm @(selectedBatchId is null ? "btn-dark" : "btn-outline-dark")"
-                        @onclick="ClearBatchSelection">
-                    Todos
+                <button type="button" class="btn btn-sm @(autoFollow ? "btn-dark" : "btn-outline-dark")"
+                        title="Muestra solo los lotes que se están recogiendo en cada instante" @onclick="EnableAutoFollow">
+                    Auto
                 </button>
                 @foreach (var batch in result.Batches)
                 {
                     var color = WarehouseMap.ColorFor(batch.BatchId);
-                    var active = selectedBatchId == batch.BatchId;
+                    var active = visible is not null && visible.Contains(batch.BatchId);
                     <button type="button" class="btn btn-sm d-inline-flex align-items-center gap-1"
                             style="@ChipStyle(color, active)"
-                            title="@($"Lote {batch.BatchId}: {batch.OrderCount} pedidos, distancia {batch.Distance:0.##}")"
+                            title="@($"Lote {batch.BatchId} (picker {batch.PickerId}, inicio t={batch.StartSeconds:0.#}s): {batch.OrderCount} pedidos, distancia {batch.Distance:0.##}")"
                             @onclick="() => SelectBatch(batch.BatchId)">
                         <span style="width:.6rem;height:.6rem;border-radius:50%;display:inline-block;background:@(active ? "#fff" : color)"></span>
                         @batch.BatchId
@@ -110,26 +140,117 @@ else
             </div>
         }
 
-        @if (selectedBatchId is int sel && result.Batches.FirstOrDefault(b => b.BatchId == sel) is { } sb)
+        @if (autoFollow && result.Tracks.Count > 0)
         {
             <div class="mb-2 small">
-                Aislado <strong>Lote @sb.BatchId</strong> — @sb.OrderCount pedidos · distancia @sb.Distance.ToString("0.##")
-                <button class="btn btn-link btn-sm p-0 ms-2 align-baseline" @onclick="ClearBatchSelection">(mostrar todos)</button>
+                @if (visible is null)
+                {
+                    <span>Modo automático: no queda ningún lote en curso (mostrando todos).</span>
+                }
+                else
+                {
+                    <span>Lotes en curso:</span>
+                    @foreach (var ab in result.Batches.Where(b => visible.Contains(b.BatchId)))
+                    {
+                        <span class="ms-2 text-nowrap">
+                            <strong style="color:@WarehouseMap.ColorFor(ab.BatchId)">Lote @ab.BatchId</strong>
+                            (picker @ab.PickerId, @ab.Items.Count(i => i.PickedAtSeconds <= currentTime)/@ab.Items.Count)
+                            <button type="button" class="btn btn-sm py-0 px-1 @(detailBatchId == ab.BatchId ? "btn-secondary" : "btn-outline-secondary")"
+                                    title="Ver los artículos recogidos y pendientes de este lote" @onclick="() => ToggleDetail(ab.BatchId)">
+                                Artículos
+                            </button>
+                        </span>
+                    }
+                }
+            </div>
+        }
+        else if (selectedBatchId is int sel && result.Batches.FirstOrDefault(b => b.BatchId == sel) is { } sb)
+        {
+            <div class="mb-2 small">
+                Aislado <strong>Lote @sb.BatchId</strong> — picker @sb.PickerId (inicio t = @sb.StartSeconds.ToString("0.#")s) · @sb.OrderCount pedidos · distancia @sb.Distance.ToString("0.##")
+                · @sb.Items.Count(i => i.PickedAtSeconds <= currentTime)/@sb.Items.Count artículos recogidos
+                <button type="button" class="btn btn-sm py-0 px-1 ms-1 @(detailBatchId == sb.BatchId ? "btn-secondary" : "btn-outline-secondary")"
+                        title="Ver los artículos recogidos y pendientes de este lote" @onclick="() => ToggleDetail(sb.BatchId)">
+                    Artículos
+                </button>
+                <button class="btn btn-link btn-sm p-0 ms-2 align-baseline" @onclick="EnableAutoFollow">(volver a Auto)</button>
             </div>
         }
 
         <WarehouseMap Result="result" CurrentFrame="CurrentFrame"
-                      SelectedBatchId="selectedBatchId" OnBatchClicked="SelectBatch" />
+                      VisibleBatchIds="visible" OnBatchClicked="SelectBatch" />
+
+        @* Ventana flotante con los artículos de un lote en el instante actual (no bloquea el mapa). *@
+        @if (detailBatchId is int db && result.Batches.FirstOrDefault(b => b.BatchId == db) is { } detail)
+        {
+            var picked = detail.Items.Where(i => i.PickedAtSeconds <= currentTime).OrderBy(i => i.PickedAtSeconds).ToList();
+            var pending = detail.Items.Where(i => !(i.PickedAtSeconds <= currentTime))
+                                      .OrderBy(i => i.PickedAtSeconds ?? double.MaxValue).ToList();
+            <div class="card shadow position-fixed"
+                 style="right:1rem;bottom:1rem;width:min(24rem, calc(100vw - 2rem));max-height:60vh;z-index:1050">
+                <div class="card-header d-flex align-items-center gap-2 py-2">
+                    <span style="width:.7rem;height:.7rem;border-radius:50%;display:inline-block;background:@WarehouseMap.ColorFor(detail.BatchId)"></span>
+                    <strong>Lote @detail.BatchId</strong>
+                    <span class="text-muted small">
+                        picker @detail.PickerId · @picked.Count/@detail.Items.Count recogidos · t = @FormatTime(currentTime)
+                    </span>
+                    <button type="button" class="btn-close ms-auto" aria-label="Cerrar" @onclick="() => detailBatchId = null"></button>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="min-height:0">
+                    <table class="table table-sm mb-0 small">
+                        <thead class="table-light" style="position:sticky;top:0">
+                            <tr><th class="ps-3">#</th><th>SKU</th><th>Hora</th><th>Estado</th></tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < picked.Count; i++)
+                            {
+                                var item = picked[i];
+                                <tr>
+                                    <td class="ps-3">@(i + 1)</td>
+                                    <td>@item.Sku</td>
+                                    <td>@FormatTime(item.PickedAtSeconds!.Value)</td>
+                                    <td><span class="badge bg-success">recogido</span></td>
+                                </tr>
+                            }
+                            @foreach (var item in pending)
+                            {
+                                <tr class="text-muted">
+                                    <td class="ps-3"></td>
+                                    <td>@item.Sku</td>
+                                    <td title="Hora prevista">@(item.PickedAtSeconds is double t ? $"({FormatTime(t)})" : "—")</td>
+                                    <td><span class="badge bg-light text-muted border">pendiente</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
     }
 }
 
 @code {
-    private IReadOnlyList<WarehouseSummary>? warehouses;
+    private IReadOnlyList<WarehouseFolder>? folders;
+    private IReadOnlyList<WarehouseSummary> warehouses = [];
     private StrategyCatalog? strategies;
     private string? loadError, runError;
 
+    // Selector en dos pasos: carpeta de WarehouseInstances y, dentro, la instancia.
+    // En carpetas grandes se muestra además un filtro por nombre.
+    private const int FilterThreshold = 20;
+    private string? selectedFolder;
+    private string warehouseFilter = "";
+    private bool loadingWarehouses;
     private Guid selectedWarehouse;
+
+    private IReadOnlyList<WarehouseSummary> FilteredWarehouses =>
+        warehouseFilter.Length == 0
+            ? warehouses
+            : warehouses.Where(w => w.Name.Contains(warehouseFilter, StringComparison.OrdinalIgnoreCase)
+                                    || (w.Group?.Contains(warehouseFilter, StringComparison.OrdinalIgnoreCase) ?? false))
+                        .ToList();
     private string? selectedBatching, selectedRouting;
+    private int pickers = 1;
 
     private bool running;
     private SimulationResult? result;
@@ -137,18 +258,57 @@ else
     // Selección/aislamiento de lote en el mapa.
     private int? selectedBatchId;
 
-    // Reproducción de la animación.
-    private int frameIndex;
+    // Lote cuya lista de artículos se muestra en la ventana flotante (null = cerrada).
+    private int? detailBatchId;
+
+    private void ToggleDetail(int batchId) => detailBatchId = detailBatchId == batchId ? null : batchId;
+
+    // Modo automático: se resaltan los lotes que se están recogiendo en el instante actual.
+    // Es el modo por defecto y se reactiva con cada plan nuevo y al pulsar Play;
+    // elegir un lote lo aísla, y volver a pulsarlo regresa al modo automático.
+    private bool autoFollow = true;
+
+    private IReadOnlyCollection<int>? VisibleBatchIds
+    {
+        get
+        {
+            if (autoFollow)
+            {
+                var active = CurrentFrame?.Agents.Where(a => a.Action == "moving").Select(a => a.BatchId).ToHashSet();
+                return active is { Count: > 0 } ? active : null; // al terminar, se muestran todos
+            }
+            return selectedBatchId is int sel ? [sel] : null;
+        }
+    }
+
+    // Reproducción de la animación, en tiempo de simulación (segundos reales del plan).
+    // La velocidad indica cuántos segundos simulados avanzan por cada segundo de reloj.
+    private static readonly int[] Speeds = [1, 5, 10, 30, 60, 120, 300, 600];
+    private const double TargetPlaybackSeconds = 60;
+
+    private double currentTime;
+    private int speed = 60;
     private bool playing;
     private PeriodicTimer? timer;
     private CancellationTokenSource? playCts;
 
-    private SimulationFrame? CurrentFrame =>
-        result is { Frames.Count: > 0 } && frameIndex < result.Frames.Count
-            ? result.Frames[frameIndex]
-            : null;
+    private double Duration => result?.Metrics.EstimatedDuration.TotalSeconds ?? 0;
 
-    private double CurrentTime => CurrentFrame?.TimestampSeconds ?? 0;
+    private int SliderSeconds
+    {
+        get => (int)Math.Round(currentTime);
+        set => currentTime = Math.Clamp(value, 0, Duration);
+    }
+
+    private SimulationFrame? CurrentFrame =>
+        result is { Tracks.Count: > 0 } ? TrackPlayback.At(result.Tracks, currentTime) : null;
+
+    // Velocidad por defecto: la más lenta con la que el plan completo se reproduce en ~1 minuto.
+    private static int DefaultSpeed(double durationSeconds)
+        => Speeds.FirstOrDefault(s => durationSeconds / s <= TargetPlaybackSeconds, Speeds[^1]);
+
+    private static string FormatTime(double seconds)
+        => TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss");
 
     protected override async Task OnInitializedAsync()
     {
@@ -176,15 +336,19 @@ else
         if (selectedBatching is null || selectedRouting is null) return;
 
         StopTimer();
-        frameIndex = 0;
-        selectedBatchId = null;
+        currentTime = 0;
+        EnableAutoFollow();
+        detailBatchId = null;
         running = true;
         runError = null;
         result = null;
         try
         {
-            var request = new PlanRequest(selectedWarehouse, selectedBatching, selectedRouting);
+            pickers = Math.Max(1, pickers);
+            var request = new PlanRequest(selectedWarehouse, selectedBatching, selectedRouting,
+                new BatchingOptions(Pickers: pickers));
             result = await Api.CreatePlanAsync(request);
+            speed = DefaultSpeed(Duration);
         }
         catch (Exception ex)
         {
@@ -196,11 +360,23 @@ else
         }
     }
 
-    // Toggle: clicar el lote ya aislado lo deselecciona. Compartido por chips y mapa.
+    // Toggle: clicar el lote ya aislado vuelve al modo automático. Compartido por chips y mapa.
     private void SelectBatch(int batchId)
-        => selectedBatchId = selectedBatchId == batchId ? null : batchId;
+    {
+        if (!autoFollow && selectedBatchId == batchId)
+        {
+            EnableAutoFollow();
+            return;
+        }
 
-    private void ClearBatchSelection() => selectedBatchId = null;
+        (selectedBatchId, autoFollow) = (batchId, false);
+
+        // Al elegir un lote, el tiempo salta al instante en que su picker empieza a recogerlo.
+        if (result?.Batches.FirstOrDefault(b => b.BatchId == batchId) is { } batch)
+            currentTime = Math.Clamp(batch.StartSeconds, 0, Duration);
+    }
+
+    private void EnableAutoFollow() => (selectedBatchId, autoFollow) = (null, true);
 
     private static string ChipStyle(string color, bool active)
         => active ? $"border:2px solid {color};background:{color};color:#fff"
@@ -209,21 +385,26 @@ else
     private async Task TogglePlay()
     {
         if (playing) { StopTimer(); return; }
-        if (result is null || result.Frames.Count == 0) return;
+        if (result is null || result.Tracks.Count == 0) return;
 
-        if (frameIndex >= result.Frames.Count - 1) frameIndex = 0; // reinicia si está al final
+        if (currentTime >= Duration) currentTime = 0; // reinicia si está al final
+        EnableAutoFollow(); // cada Play vuelve a seguir los lotes activos
 
         playing = true;
         playCts = new CancellationTokenSource();
-        timer = new PeriodicTimer(TimeSpan.FromMilliseconds(60)); // ~16 fps
+        timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50)); // ~20 fps
+        var clock = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
             while (await timer.WaitForNextTickAsync(playCts.Token))
             {
-                if (frameIndex >= result.Frames.Count - 1) { StopTimer(); break; }
-                frameIndex++;
+                // Avanza según el tiempo de reloj realmente transcurrido, no por tick.
+                var elapsed = clock.Elapsed.TotalSeconds;
+                clock.Restart();
+                currentTime = Math.Min(currentTime + elapsed * speed, Duration);
                 await InvokeAsync(StateHasChanged);
+                if (currentTime >= Duration) { StopTimer(); break; }
             }
         }
         catch (OperationCanceledException) { /* pausa solicitada */ }
@@ -242,7 +423,7 @@ else
     private void Reset()
     {
         StopTimer();
-        frameIndex = 0;
+        currentTime = 0;
     }
 
     public void Dispose() => StopTimer();
