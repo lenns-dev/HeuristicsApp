@@ -12,11 +12,11 @@
 {
     <div class="alert alert-danger">No se pudo cargar el catálogo: @loadError</div>
 }
-else if (warehouses is null || strategies is null)
+else if (folders is null || strategies is null)
 {
     <p><em>Cargando catálogo…</em></p>
 }
-else if (warehouses.Count == 0)
+else if (folders.Count == 0)
 {
     <div class="alert alert-warning">No hay instancias de almacén cargadas en el servicio.</div>
 }
@@ -24,11 +24,53 @@ else
 {
     <div class="row g-3 align-items-end mb-3">
         <div class="col-auto">
-            <label class="form-label">Almacén</label>
-            <select class="form-select" @bind="selectedWarehouse">
-                @foreach (var w in warehouses)
+            <label class="form-label">Carpeta</label>
+            <select class="form-select" @bind="selectedFolder" @bind:after="LoadWarehousesAsync">
+                @foreach (var f in folders)
                 {
-                    <option value="@w.Id">@w.Name</option>
+                    <option value="@f.Name">@f.Name (@f.Count)</option>
+                }
+            </select>
+        </div>
+        @if (warehouses.Count > FilterThreshold)
+        {
+            <div class="col-auto">
+                <label class="form-label">Filtrar</label>
+                <input class="form-control" style="width:10rem" placeholder="p.ej. _100_ o ID12"
+                       @bind="warehouseFilter" @bind:event="oninput" @bind:after="EnsureSelectionVisible" />
+            </div>
+        }
+        <div class="col-auto">
+            <label class="form-label">
+                Almacén
+                @if (loadingWarehouses)
+                {
+                    <span class="spinner-border spinner-border-sm ms-1" role="status"></span>
+                }
+                else if (warehouseFilter.Length > 0)
+                {
+                    <span class="text-muted small">(@FilteredWarehouses.Count de @warehouses.Count)</span>
+                }
+            </label>
+            <select class="form-select" style="max-width:24rem" @bind="selectedWarehouse" disabled="@loadingWarehouses">
+                @foreach (var g in FilteredWarehouses.GroupBy(w => w.Group))
+                {
+                    @if (g.Key is null)
+                    {
+                        @foreach (var w in g)
+                        {
+                            <option value="@w.Id">@w.Name</option>
+                        }
+                    }
+                    else
+                    {
+                        <optgroup label="@g.Key">
+                            @foreach (var w in g)
+                            {
+                                <option value="@w.Id">@w.Name</option>
+                            }
+                        </optgroup>
+                    }
                 }
             </select>
         </div>
@@ -314,10 +356,11 @@ else
     {
         try
         {
-            warehouses = await Api.GetWarehousesAsync();
+            folders = await Api.GetWarehouseFoldersAsync();
             strategies = await Api.GetStrategiesAsync();
 
-            selectedWarehouse = warehouses.FirstOrDefault()?.Id ?? Guid.Empty;
+            selectedFolder = folders.FirstOrDefault()?.Name;
+            await LoadWarehousesAsync();
             // Preselección de las heurísticas funcionales (caen al primero si no existen).
             selectedBatching = Pick(strategies?.Batching, "random");
             selectedRouting = Pick(strategies?.Routing, "s-shape");
@@ -326,6 +369,37 @@ else
         {
             loadError = ex.Message;
         }
+    }
+
+    private async Task LoadWarehousesAsync()
+    {
+        warehouses = [];
+        warehouseFilter = "";
+        selectedWarehouse = Guid.Empty;
+        if (selectedFolder is null) return;
+
+        loadingWarehouses = true;
+        try
+        {
+            warehouses = await Api.GetWarehousesAsync(selectedFolder);
+            selectedWarehouse = warehouses.FirstOrDefault()?.Id ?? Guid.Empty;
+        }
+        catch (Exception ex)
+        {
+            runError = $"No se pudieron cargar los almacenes de '{selectedFolder}': {ex.Message}";
+        }
+        finally
+        {
+            loadingWarehouses = false;
+        }
+    }
+
+    // Si el filtro oculta el almacén elegido, se pasa al primero visible (el select mostraría otro).
+    private void EnsureSelectionVisible()
+    {
+        var visible = FilteredWarehouses;
+        if (visible.All(w => w.Id != selectedWarehouse))
+            selectedWarehouse = visible.FirstOrDefault()?.Id ?? Guid.Empty;
     }
 
     private static string? Pick(IReadOnlyList<StrategyInfo>? items, string preferredKey)

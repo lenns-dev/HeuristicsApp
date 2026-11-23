@@ -1,6 +1,38 @@
 @ApiService_HostAddress = http://localhost:5364
 
-GET {{ApiService_HostAddress}}/weatherforecast/
+### Heurísticas habilitadas (las registradas en Program.cs)
+GET {{ApiService_HostAddress}}/strategies
 Accept: application/json
+
+### Carpetas de instancias
+GET {{ApiService_HostAddress}}/warehouse-folders
+Accept: application/json
+
+### Instancias de una carpeta (copia un "id" para la petición de plan)
+GET {{ApiService_HostAddress}}/warehouses?folder=W5A
+Accept: application/json
+
+### Estado de la sincronización de instancias con el repositorio
+GET {{ApiService_HostAddress}}/dataset/status
+Accept: application/json
+
+### Comprobar diferencias con el repositorio sin modificar nada
+POST {{ApiService_HostAddress}}/dataset/sync?dryRun=true
+
+### Sincronizar la carpeta de instancias con /dataset del repositorio (descarga y borra)
+POST {{ApiService_HostAddress}}/dataset/sync
+
+### Ejecutar un plan
+@WarehouseId = 00000000-0000-0000-0000-000000000000
+
+POST {{ApiService_HostAddress}}/plan
+Content-Type: application/json
+
+{
+  "warehouseId": "{{WarehouseId}}",
+  "batchingKey": "cwSavingConstructive",
+  "routingKey": "s-shape",
+  "options": { "pickers": 2 }
+}
 
 ###
