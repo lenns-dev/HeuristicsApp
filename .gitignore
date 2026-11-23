@@ -9,3 +9,6 @@ obj/
 
 # .NET Aspire / Logs
 *.log
+# Secretos (tokens en los .env generados por Aspire)
+.env
+.env.*
