@@ -54,3 +54,45 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+/* Páginas de documentación (Documentación, Docker): secciones, índice y bloques de código. */
+.doc-page section {
+    max-width: 62rem;
+    padding-top: 1rem;
+    margin-bottom: 1.5rem;
+    scroll-margin-top: 4rem; /* que la barra superior fija no tape el título al saltar desde el índice */
+}
+
+    .doc-page section h2 {
+        font-size: 1.4rem;
+        padding-bottom: .35rem;
+        border-bottom: 2px solid #1F81BF;
+        margin-bottom: .9rem;
+    }
+
+    .doc-page section h3 {
+        margin-top: 1.25rem;
+        font-weight: 600;
+    }
+
+.doc-page .toc {
+    display: inline-block;
+    padding: .75rem 1.25rem .25rem 1.25rem;
+    border: 1px solid #dee2e6;
+    border-left: 4px solid #1F81BF;
+    border-radius: .375rem;
+    background: rgba(31, 129, 191, 0.05);
+}
+
+    .doc-page .toc ol {
+        margin: .35rem 0 .5rem 0;
+        padding-left: 1.25rem;
+    }
+
+.doc-page pre {
+    background: #f6f8fa;
+    border: 1px solid #e5e7eb;
+    border-radius: .375rem;
+    padding: .75rem 1rem;
+    font-size: .85rem;
+}

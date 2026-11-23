@@ -1,5 +1,101 @@
 ﻿@page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Inicio · HeuristicsApp</PageTitle>
 
-<h1>Heuristics Visual Simulator</h1>
+<header class="hero">
+    <img class="hero-logo" src="@Assets["logos/logo-etsisi.png"]"
+         alt="ETSI Sistemas Informáticos · Universidad Politécnica de Madrid" />
+    <div>
+        <h1>Simulador Visual Heurístico</h1>
+        <p class="lead mb-3">
+            Simulador de preparación de pedidos (<em>order picking</em>): agrupa los pedidos en lotes
+            (<em>batching</em>), calcula la ruta de cada lote (<em>routing</em>) y reproduce cómo los
+            pickers recorren el almacén.
+        </p>
+        <a class="btn btn-accent" href="planner">Abrir el planificador</a>
+        <p class="lead mb-3">
+            <br/>
+            Jaime de Román Monleón - <strong>bn0100</strong>
+        </p>
+    </div>
+</header>
+
+<h2 class="h4 mt-4 mb-3">Guía de uso</h2>
+
+<ol class="steps">
+    <li>
+        <h3 class="h6">Elige el almacén</h3>
+        <p>
+            Selecciona primero una <strong>Carpeta</strong> de instancias (el número entre paréntesis indica
+            cuántas contiene) y después el <strong>Almacén</strong>. Si la carpeta tiene subcarpetas, los
+            almacenes aparecen agrupados por ellas. En carpetas grandes aparece un campo <strong>Filtrar</strong>
+            para buscar por nombre, por ejemplo <code>_100_</code> o <code>ID12</code>.
+        </p>
+    </li>
+    <li>
+        <h3 class="h6">Elige las heurísticas</h3>
+        <p class="mb-1"><strong>Batching</strong> (cómo se agrupan los pedidos en lotes, respetando la capacidad del picker):</p>
+        <ul>
+            <li><strong>Random</strong>: baraja los pedidos y llena lotes en ese orden. Sirve como referencia.</li>
+            <li><strong>Basic Constructive</strong>: coloca cada pedido en el primer lote donde aún cabe.</li>
+            <li><strong>CW Saving Constructive</strong>: une lotes por parejas eligiendo siempre la unión que más distancia ahorra (Clarke-Wright). Es el más lento.</li>
+        </ul>
+        <p class="mb-1"><strong>Routing</strong> (por dónde recorre el picker cada lote):</p>
+        <ul class="mb-0">
+            <li><strong>S-Shape</strong>: atraviesa por completo cada pasillo con artículos, en zigzag.</li>
+            <li><strong>Largest Gap</strong>: atraviesa el primer y el último pasillo; en los intermedios entra y sale por el mismo extremo, sin recorrer el tramo vacío tras el último artículo.</li>
+            <li><strong>Combined</strong>: decide pasillo a pasillo entre atravesarlo o entrar y volver por el mismo extremo, quedándose con la opción más corta.</li>
+        </ul>
+    </li>
+    <li>
+        <h3 class="h6">Indica el número de pickers y ejecuta</h3>
+        <p>
+            <strong>Pickers</strong> es el número de operarios que trabajan a la vez. Cada lote se asigna al
+            picker que antes queda libre. Pulsa <strong>Ejecutar</strong> para calcular el plan.
+        </p>
+    </li>
+    <li>
+        <h3 class="h6">Interpreta los resultados</h3>
+        <ul class="mb-0">
+            <li><strong>Lotes</strong> y <strong>Pickers</strong>: lotes generados y operarios usados.</li>
+            <li><strong>Distancia</strong>: suma de los recorridos de todos los lotes.</li>
+            <li><strong>Velocidad · Recogida</strong>: velocidad de desplazamiento y tiempo de parada por artículo que define la instancia.</li>
+            <li><strong>Duración est.</strong>: tiempo hasta que termina el último picker (desplazamientos más recogidas).</li>
+            <li><strong>Almacén</strong>: ancho × largo y distancia entre ejes de pasillos; también aparecen como cotas en el mapa.</li>
+            <li><strong>Cómputo</strong>: tiempo que tardaron las heurísticas en calcular el plan.</li>
+        </ul>
+    </li>
+    <li>
+        <h3 class="h6">Lee el mapa</h3>
+        <ul class="mb-0">
+            <li>Las bandas grises son los pasillos y el punto negro es el depósito, donde empieza y acaba cada lote.</li>
+            <li>Cada lote tiene un color: su línea es la ruta y sus cuadrados son los artículos que debe recoger.</li>
+            <li>Un cuadrado <strong>hueco</strong> está pendiente; <strong>relleno</strong>, ya recogido.</li>
+            <li>Los círculos grandes son los pickers, coloreados según el lote que están haciendo.</li>
+            <li>Al pasar el ratón sobre un artículo se ve su SKU y la hora de recogida.</li>
+        </ul>
+    </li>
+    <li>
+        <h3 class="h6">Reproduce la simulación</h3>
+        <p>
+            <strong>▶ Play</strong> inicia la animación y <strong>⏮ Reinicio</strong> vuelve al principio. El
+            selector <strong>x1…x600</strong> fija cuántos segundos simulados avanzan por cada segundo real
+            (por defecto, el plan completo dura alrededor de un minuto). La barra permite saltar a cualquier
+            instante; el reloj muestra el tiempo actual y la duración total.
+        </p>
+    </li>
+    <li>
+        <h3 class="h6">Sigue los lotes</h3>
+        <ul class="mb-0">
+            <li>En modo <strong>Auto</strong> (por defecto y cada vez que se pulsa Play) solo se resaltan los lotes que se están recogiendo en cada momento.</li>
+            <li>Al pulsar un lote (en la lista, su ruta o uno de sus artículos) se aísla y el tiempo salta al instante en que empieza. Pulsarlo de nuevo vuelve a Auto.</li>
+            <li>El botón <strong>Artículos</strong> abre una ventana con lo que ese picker ya ha recogido (y cuándo) y lo que le queda, actualizada en tiempo real.</li>
+        </ul>
+    </li>
+</ol>
+
+<div class="alert alert-light border small mt-4">
+    <strong>Notas.</strong> Las medidas y los tiempos usan las unidades de cada instancia; el reloj los
+    muestra como segundos. La capacidad de cada picker se toma de la instancia (<code>workerCapacity</code>)
+    y se aplica sobre el peso de los pedidos.
+</div>
