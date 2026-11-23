@@ -1,0 +1,17 @@
+.btn-accent {
+    background-color: #1F81BF;
+    border-color: #1F81BF;
+    color: #fff;
+}
+
+    .btn-accent:hover, .btn-accent:focus {
+        background-color: #176a9e;
+        border-color: #176a9e;
+        color: #fff;
+    }
+
+    .btn-accent:disabled {
+        background-color: #1F81BF;
+        border-color: #1F81BF;
+        opacity: .5;
+    }
