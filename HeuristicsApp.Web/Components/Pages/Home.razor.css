@@ -1,0 +1,72 @@
+.hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.5rem 2.5rem;
+    padding: 1.5rem;
+    border: 1px solid #dee2e6;
+    border-left: 6px solid #1F81BF;
+    border-radius: .5rem;
+    background: linear-gradient(90deg, rgba(31, 129, 191, 0.08) 0%, #fff 60%);
+}
+
+.hero-logo {
+    width: 16rem;
+    max-width: 100%;
+    height: auto;
+}
+
+.hero > div {
+    flex: 1 1 20rem;
+}
+
+.btn-accent {
+    background-color: #1F81BF;
+    border-color: #1F81BF;
+    color: #fff;
+}
+
+    .btn-accent:hover, .btn-accent:focus {
+        background-color: #176a9e;
+        border-color: #176a9e;
+        color: #fff;
+    }
+
+/* Pasos numerados con un círculo del color corporativo. */
+.steps {
+    list-style: none;
+    counter-reset: step;
+    padding-left: 0;
+    max-width: 60rem;
+}
+
+    .steps > li {
+        counter-increment: step;
+        position: relative;
+        padding: 0 0 1.25rem 3rem;
+    }
+
+        .steps > li::before {
+            content: counter(step);
+            position: absolute;
+            left: 0;
+            top: -0.15rem;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            background: #1F81BF;
+            color: #fff;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+    .steps h3 {
+        margin-bottom: .35rem;
+        font-weight: 600;
+    }
+
+    .steps p, .steps ul {
+        margin-bottom: .5rem;
+    }

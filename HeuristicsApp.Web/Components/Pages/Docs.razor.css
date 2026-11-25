@@ -1,0 +1,49 @@
+/* Diagrama de arquitectura: cajas en fila que se apilan en pantallas estrechas. */
+.arch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: .5rem;
+    margin: 1rem 0 .5rem 0;
+}
+
+.arch-box {
+    flex: 1 1 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    padding: .75rem 1rem;
+    border-radius: .5rem;
+    border: 1px solid #b6d4e8;
+    background: #fff;
+    border-top: 4px solid #1F81BF;
+}
+
+    .arch-box span {
+        font-size: .85rem;
+        color: #6c757d;
+    }
+
+    .arch-box.api {
+        border-top-color: #176a9e;
+    }
+
+    .arch-box.core {
+        border-top-color: #0f4a70;
+    }
+
+.arch-arrow {
+    align-self: center;
+    color: #1F81BF;
+    font-weight: 600;
+    font-size: .85rem;
+    white-space: nowrap;
+}
+
+.arch-notes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem 1.5rem;
+    font-size: .85rem;
+    color: #495057;
+}

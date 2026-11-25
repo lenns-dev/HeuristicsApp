@@ -1,0 +1,246 @@
+@page "/docker"
+
+<PageTitle>Docker · HeuristicsApp</PageTitle>
+
+<div class="doc-page">
+
+<h1>Docker: exportar y desplegar</h1>
+<p class="lead">
+    Cómo generar los contenedores de la aplicación con .NET Aspire, arrancarlos con Docker Compose,
+    llevarlos a otra máquina y resolver los problemas habituales.
+</p>
+
+<nav class="toc">
+    <strong>Contenido</strong>
+    <ol>
+        <li><a href="docker#requisitos">Requisitos</a></li>
+        <li><a href="docker#servicios">Qué se despliega</a></li>
+        <li><a href="docker#exportar">Exportar: generar imágenes y docker-compose</a></li>
+        <li><a href="docker#arrancar">Arrancar, parar y consultar</a></li>
+        <li><a href="docker#configuracion">Configuración y variables</a></li>
+        <li><a href="docker#instancias">Instancias de almacén en el contenedor</a></li>
+        <li><a href="docker#otra-maquina">Llevarlo a otra máquina</a></li>
+        <li><a href="docker#actualizar">Actualizar tras cambiar el código</a></li>
+        <li><a href="docker#local">Ejecutar sin Docker</a></li>
+        <li><a href="docker#problemas">Problemas frecuentes</a></li>
+    </ol>
+</nav>
+
+@* ------------------------------------------------------------------ *@
+<section id="requisitos">
+    <h2>1. Requisitos</h2>
+    <ul>
+        <li><strong>Docker Desktop</strong> instalado y <strong>con el motor arrancado</strong> (icono de la ballena en verde).</li>
+        <li><strong>SDK de .NET</strong> (la solución compila para .NET 9).</li>
+        <li>Opcional: el CLI de Aspire, que ofrece comandos más cortos:
+            <code>dotnet tool install -g Aspire.Cli</code>.</li>
+        <li>Unos 2 GB libres para las imágenes: la de la API incluye todas las instancias de almacén.</li>
+    </ul>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="servicios">
+    <h2>2. Qué se despliega</h2>
+    <p>
+        El despliegue se define en <code>HeuristicsApp.AppHost/AppHost.cs</code> (región <em>Docker</em>) y
+        Aspire lo traduce a un <code>docker-compose.yaml</code> con tres servicios en una red privada
+        (<code>aspire</code>):
+    </p>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Servicio</th><th>Imagen</th><th>Puerto en el host</th><th>Función</th></tr></thead>
+        <tbody>
+            <tr><td><code>web</code></td><td><code>web:latest</code> (~240 MB)</td><td><strong>8081</strong></td><td>Interfaz Blazor.</td></tr>
+            <tr><td><code>api</code></td><td><code>api:latest</code> (~1,7 GB)</td><td>— (solo red interna)</td><td>API con las heurísticas y las instancias.</td></tr>
+            <tr><td><code>compose-dashboard</code></td><td><code>aspire-dashboard</code></td><td><strong>8080</strong></td><td>Dashboard de Aspire: logs, trazas y métricas de los otros dos.</td></tr>
+        </tbody>
+    </table>
+    <p>
+        La web llega a la API por la red interna (<code>http://api:8080</code>); la API no se publica al
+        exterior. Los contenedores se ejecutan en entorno <em>Production</em>.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="exportar">
+    <h2>3. Exportar: generar imágenes y docker-compose</h2>
+    <p>Desde la carpeta raíz de la solución:</p>
+    <pre><code>dotnet run --project HeuristicsApp.AppHost -- --operation publish --step prepare-compose --output-path ./artifacts</code></pre>
+    <p class="mb-1">Con el CLI de Aspire, el equivalente es (por defecto deja los ficheros en <code>./aspire-output</code>):</p>
+    <pre><code>aspire do prepare-compose</code></pre>
+    <p class="mb-1">Este paso compila la solución, construye las imágenes <code>api:latest</code> y <code>web:latest</code> y deja en <code>./artifacts</code>:</p>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Fichero</th><th>Contenido</th></tr></thead>
+        <tbody>
+            <tr><td><code>docker-compose.yaml</code></td><td>Definición de los tres servicios.</td></tr>
+            <tr><td><code>.env.Development</code></td><td>Valores ya rellenos (puertos, token…). <strong>Es el que hay que usar.</strong></td></tr>
+            <tr><td><code>.env</code></td><td>Plantilla con las mismas variables vacías.</td></tr>
+        </tbody>
+    </table>
+    <p>
+        El sufijo del <code>.env</code> es el entorno del AppHost (<em>Development</em> al lanzarlo desde la
+        solución). Con el CLI se puede elegir otro: <code>aspire do prepare-compose --environment Production</code>.
+    </p>
+    <p class="mb-1">Si solo quieres los ficheros, sin construir imágenes:</p>
+    <pre><code>dotnet run --project HeuristicsApp.AppHost -- --operation publish --step publish --output-path ./artifacts</code></pre>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="arrancar">
+    <h2>4. Arrancar, parar y consultar</h2>
+    <pre><code># Arrancar (en segundo plano)
+docker compose -f ./artifacts/docker-compose.yaml --env-file ./artifacts/.env.Development up -d
+
+# Estado de los contenedores
+docker compose -f ./artifacts/docker-compose.yaml --env-file ./artifacts/.env.Development ps
+
+# Logs de un servicio (Ctrl+C para salir)
+docker compose -f ./artifacts/docker-compose.yaml --env-file ./artifacts/.env.Development logs -f api
+
+# Parar y eliminar los contenedores (las imágenes se conservan)
+docker compose -f ./artifacts/docker-compose.yaml --env-file ./artifacts/.env.Development down</code></pre>
+    <ul>
+        <li>Aplicación: <a href="http://localhost:8081" target="_blank">http://localhost:8081</a></li>
+        <li>Dashboard de Aspire: <a href="http://localhost:8080" target="_blank">http://localhost:8080</a>
+            (pide un token de acceso: aparece en los logs del servicio <code>compose-dashboard</code>).</li>
+    </ul>
+    <p>
+        Al arrancar, la API indexa las instancias; en sus logs debe aparecer una línea como
+        <code>Indexed N warehouse instances in M folders from /app/WarehouseInstances</code>.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="configuracion">
+    <h2>5. Configuración y variables</h2>
+    <h3 class="h5">Variables del fichero .env</h3>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Variable</th><th>Uso</th></tr></thead>
+        <tbody>
+            <tr><td><code>API_PORT</code>, <code>WEB_PORT</code></td><td>Puerto interno de cada contenedor (8080). No cambian los puertos del host.</td></tr>
+            <tr><td><code>DATASET_TOKEN</code></td><td>Token del repositorio de instancias para la sincronización
+                (llega a la API como <code>WarehouseDataset__Token</code>). Se rellena a mano en el <code>.env</code> y no debe subirse al repositorio.</td></tr>
+            <tr><td><code>API_IMAGE</code>, <code>WEB_IMAGE</code></td><td>No es necesario rellenarlas: el compose usa las imágenes
+                <code>api:latest</code> y <code>web:latest</code>.</td></tr>
+        </tbody>
+    </table>
+
+    <h3 class="h5">Dónde se cambia cada cosa</h3>
+    <ul>
+        <li><strong>Puerto del dashboard</strong>: <code>dashboard.WithHostPort(8080)</code> en <code>AppHost.cs</code>.</li>
+        <li><strong>Puerto de la web</strong>: <code>service.Ports.Add("8081:${WEB_PORT}")</code> en <code>AppHost.cs</code>.</li>
+        <li><strong>Repositorio de instancias</strong>: sección <code>WarehouseDataset</code> de
+            <code>HeuristicsApp.ApiService/appsettings.json</code> (queda dentro de la imagen; hay que volver a exportar tras cambiarla).</li>
+        <li>Cualquier ajuste de configuración de la API puede sobrescribirse sin reconstruir añadiendo una variable
+            de entorno al servicio, con <code>__</code> como separador (p.ej. <code>WarehouseDataset__Branch</code>).</li>
+    </ul>
+    <p class="mb-1">Para cambiar algo solo en una máquina sin tocar el fichero generado, usa un fichero adicional:</p>
+    <pre><code># docker-compose.override.yaml
+services:
+  compose-dashboard:
+    ports: !override
+      - "18080:18888"     # dashboard en 18080 si el 8080 está ocupado</code></pre>
+    <pre><code>docker compose -f ./artifacts/docker-compose.yaml -f docker-compose.override.yaml --env-file ./artifacts/.env.Development up -d</code></pre>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="instancias">
+    <h2>6. Instancias de almacén en el contenedor</h2>
+    <p>
+        Las instancias van dentro de la imagen de la API, en <code>/app/WarehouseInstances</code>. La
+        sincronización con el repositorio (pestaña <a href="instancias">Instancias</a>) escribe en esa carpeta
+        del contenedor, así que <strong>lo sincronizado se pierde al recrear el contenedor</strong> (por ejemplo,
+        tras un <code>down</code>).
+    </p>
+    <p class="mb-1">Para conservarlo, monta un volumen con nombre en esa ruta (Docker lo inicializa con el contenido de la imagen la primera vez):</p>
+    <pre><code># docker-compose.override.yaml
+services:
+  api:
+    volumes:
+      - warehouse-instances:/app/WarehouseInstances
+volumes:
+  warehouse-instances:</code></pre>
+    <p>
+        Con el volumen, las instancias nuevas de una imagen reconstruida no se ven hasta sincronizar (o borrar el
+        volumen con <code>docker volume rm</code>).
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="otra-maquina">
+    <h2>7. Llevarlo a otra máquina</h2>
+    <p>La máquina de destino solo necesita Docker. Exporta las imágenes a un fichero y copia también la carpeta <code>artifacts</code>:</p>
+    <pre><code># En la máquina de origen
+docker save api:latest web:latest -o heuristicsapp-images.tar
+
+# En la máquina de destino (con heuristicsapp-images.tar y la carpeta artifacts)
+docker load -i heuristicsapp-images.tar
+docker compose -f ./artifacts/docker-compose.yaml --env-file ./artifacts/.env.Development up -d</code></pre>
+    <p>
+        La imagen del dashboard se descarga sola de <code>mcr.microsoft.com</code>. Si se usa un registro de
+        contenedores, basta con etiquetar y subir las dos imágenes (<code>docker tag</code> + <code>docker push</code>)
+        y ajustar el nombre de imagen en el compose.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="actualizar">
+    <h2>8. Actualizar tras cambiar el código</h2>
+    <ol>
+        <li>Vuelve a exportar (<a href="docker#exportar">paso 3</a>): reconstruye <code>api:latest</code> y <code>web:latest</code>.</li>
+        <li>Ejecuta de nuevo <code>docker compose … up -d</code>: Docker recrea solo los contenedores cuya imagen ha cambiado.</li>
+    </ol>
+    <p>Si cambias <code>AppHost.cs</code> (puertos, servicios, variables), revisa también el <code>docker-compose.yaml</code> regenerado.</p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="local">
+    <h2>9. Ejecutar sin Docker</h2>
+    <p>
+        Para desarrollar no hace falta Docker: lanza el AppHost (<kbd>F5</kbd> en Visual Studio o
+        <code>dotnet run --project HeuristicsApp.AppHost</code>). Aspire arranca la API y la web como procesos
+        locales y abre su dashboard. En este modo la API lee las instancias directamente de
+        <code>HeuristicsApp.Core/WarehouseInstances</code> y el token del repositorio se toma de los user-secrets.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="problemas">
+    <h2>10. Problemas frecuentes</h2>
+    <table class="table table-sm">
+        <thead><tr><th style="width:40%">Síntoma</th><th>Causa y solución</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><em>error during connect</em> / <em>cannot find the file specified</em> al usar <code>docker</code></td>
+                <td>El motor de Docker no está arrancado. Abre Docker Desktop y espera a que esté listo.</td>
+            </tr>
+            <tr>
+                <td><em>pull access denied for api, repository does not exist</em></td>
+                <td>Las imágenes no existen en esta máquina: exporta con <code>prepare-compose</code> (no solo <code>publish</code>)
+                    o cárgalas con <code>docker load</code>.</td>
+            </tr>
+            <tr>
+                <td><em>Bind for 0.0.0.0:8080 failed: port is already allocated</em></td>
+                <td>Otro programa usa el puerto. Hay que pararlo o cambiar el puerto del host
+                    (<a href="docker#configuracion">sección 5</a>).</td>
+            </tr>
+            <tr>
+                <td>Error al compilar: <em>DefineStaticWebAssets… The input does not contain any JSON tokens</em></td>
+                <td>Caché de compilación de la web corrupta (puede ocurrir al compilar a la vez desde Visual Studio y desde
+                    la línea de comandos). Se soluciona borrando <code>HeuristicsApp.Web/obj/Debug/net9.0/rpswa.dswa.cache.json</code>
+                    y volviendo a exportar.</td>
+            </tr>
+            <tr>
+                <td>La pestaña Instancias dice que el repositorio no está configurado o devuelve 404</td>
+                <td>Revisa <code>WarehouseDataset</code> en <code>appsettings.json</code>: <code>Owner</code> es el usuario u
+                    organización de GitHub y <code>Repo</code> el nombre del repositorio (no la URL), y que
+                    <code>DATASET_TOKEN</code> tenga acceso a él.</td>
+            </tr>
+            <tr>
+                <td>Lo sincronizado desaparece al reiniciar</td>
+                <td>Falta el volumen de instancias (<a href="docker#instancias">sección 6</a>).</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+</div>

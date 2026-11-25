@@ -1,0 +1,441 @@
+@page "/docs"
+
+<PageTitle>Documentación · HeuristicsApp</PageTitle>
+
+<div class="doc-page">
+
+<h1>Documentación técnica</h1>
+<p class="lead">
+    Cómo está organizada la solución, qué hace cada proyecto y cómo añadir o ajustar algoritmos.
+</p>
+
+<nav class="toc">
+    <strong>Contenido</strong>
+    <ol>
+        <li><a href="docs#arquitectura">Arquitectura general</a></li>
+        <li><a href="docs#apphost">HeuristicsApp.AppHost</a></li>
+        <li><a href="docs#servicedefaults">HeuristicsApp.ServiceDefaults</a></li>
+        <li><a href="docs#contracts">HeuristicsApp.Contracts</a></li>
+        <li><a href="docs#core">HeuristicsApp.Core</a></li>
+        <li><a href="docs#apiservice">HeuristicsApp.ApiService</a></li>
+        <li><a href="docs#web">HeuristicsApp.Web</a></li>
+        <li><a href="docs#flujo">Flujo de una petición de plan</a></li>
+        <li><a href="docs#algoritmos">Guía: añadir, ajustar y habilitar algoritmos</a></li>
+        <li><a href="docs#instancias">Sincronización de instancias con el repositorio</a></li>
+    </ol>
+</nav>
+
+@* ------------------------------------------------------------------ *@
+<section id="arquitectura">
+    <h2>1. Arquitectura general</h2>
+    <p>
+        La solución es una aplicación <strong>.NET 9</strong> orquestada con <strong>.NET Aspire</strong>.
+        El cálculo (heurísticas) está aislado en una librería sin dependencias, expuesto por una API HTTP
+        y consumido por una web Blazor que dibuja y anima el resultado.
+    </p>
+
+    <div class="arch">
+        <div class="arch-box web">
+            <strong>Web</strong>
+            <span>Blazor Server · interfaz, mapa SVG y reproducción</span>
+        </div>
+        <div class="arch-arrow">HTTP / JSON →</div>
+        <div class="arch-box api">
+            <strong>ApiService</strong>
+            <span>Endpoints, carga de instancias, simulación temporal</span>
+        </div>
+        <div class="arch-arrow">llama a →</div>
+        <div class="arch-box core">
+            <strong>Core</strong>
+            <span>Modelo de dominio, heurísticas y planificación</span>
+        </div>
+    </div>
+    <div class="arch-notes">
+        <span><strong>Contracts</strong>: DTOs compartidos por Web y ApiService.</span>
+        <span><strong>AppHost</strong>: arranca y conecta los servicios (local y Docker).</span>
+        <span><strong>ServiceDefaults</strong>: telemetría, health checks y service discovery comunes.</span>
+    </div>
+
+    <p class="mt-3 mb-1">Dependencias entre proyectos:</p>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Proyecto</th><th>Tipo</th><th>Referencia a</th></tr></thead>
+        <tbody>
+            <tr><td>AppHost</td><td>Aspire AppHost</td><td>ApiService, Web</td></tr>
+            <tr><td>ApiService</td><td>ASP.NET Core (Minimal API)</td><td>Core, Contracts, ServiceDefaults</td></tr>
+            <tr><td>Web</td><td>ASP.NET Core (Blazor)</td><td>Contracts, ServiceDefaults</td></tr>
+            <tr><td>Core</td><td>Librería</td><td>—</td></tr>
+            <tr><td>Contracts</td><td>Librería</td><td>—</td></tr>
+            <tr><td>ServiceDefaults</td><td>Librería</td><td>—</td></tr>
+        </tbody>
+    </table>
+    <p>
+        Regla de diseño: <strong>Core no conoce ni Contracts ni ASP.NET</strong>. La traducción entre el
+        dominio y los DTOs se hace en la API (<code>Mapping/PlanMapping.cs</code>), y la Web nunca ve tipos
+        de Core.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="apphost">
+    <h2>2. HeuristicsApp.AppHost</h2>
+    <p>
+        Punto de entrada para ejecutar todo. <code>AppHost.cs</code> declara los dos servicios y cómo se
+        relacionan:
+    </p>
+    <ul>
+        <li><code>api</code> (ApiService) y <code>web</code> (Web). La web recibe una referencia a la API
+            (<code>WithReference(api)</code>) y espera a que esté lista (<code>WaitFor(api)</code>).</li>
+        <li>Un entorno <strong>docker-compose</strong> con el dashboard de Aspire publicado en el puerto 8080.</li>
+        <li>Una región <em>Windows</em> comentada con la configuración equivalente para ejecución local sin Docker.</li>
+    </ul>
+    <p class="mb-1">
+        Para generar los artefactos de docker-compose, construir las imágenes y arrancar los contenedores:
+    </p>
+    <pre><code>dotnet run --project HeuristicsApp.AppHost -- --operation publish --step prepare-compose --output-path ./artifacts
+docker compose -f ./artifacts/docker-compose.yaml --env-file ./artifacts/.env.Development up -d</code></pre>
+    <p>
+        La web queda en <code>http://localhost:8081</code> y el dashboard en <code>http://localhost:8080</code>.
+        El token del repositorio de instancias se pasa en la variable <code>DATASET_TOKEN</code> del fichero
+        <code>.env</code>. La guía completa está en la pestaña <a href="docker">Docker</a>.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="servicedefaults">
+    <h2>3. HeuristicsApp.ServiceDefaults</h2>
+    <p>Configuración transversal que comparten ApiService y Web (plantilla estándar de Aspire):</p>
+    <ul>
+        <li><code>AddServiceDefaults()</code>: OpenTelemetry (logs, métricas, trazas), health checks,
+            service discovery y resiliencia en los <code>HttpClient</code>.</li>
+        <li><code>MapDefaultEndpoints()</code>: expone <code>/health</code> y <code>/alive</code> en desarrollo.</li>
+    </ul>
+    <p>
+        Gracias al service discovery, la web llama a la API como <code>https+http://api</code> sin conocer
+        su puerto real.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="contracts">
+    <h2>4. HeuristicsApp.Contracts</h2>
+    <p>Solo <em>records</em> serializables, sin lógica. Es el "idioma" común entre API y Web.</p>
+    <table class="table table-sm">
+        <thead><tr><th>Fichero</th><th>Tipos</th><th>Uso</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>Catalog.cs</code></td>
+                <td><code>StrategyCatalog</code>, <code>StrategyInfo</code>, <code>WarehouseFolder</code>, <code>WarehouseSummary</code></td>
+                <td>Rellenar los selectores (heurísticas, carpetas, almacenes).</td>
+            </tr>
+            <tr>
+                <td rowspan="2"><code>Simulation.cs</code></td>
+                <td><code>PlanRequest</code>, <code>BatchingOptions</code></td>
+                <td>Petición de plan: almacén, claves de batching/routing y opciones (nº de pickers).</td>
+            </tr>
+            <tr>
+                <td><code>SimulationResult</code> → <code>LayoutView</code>, <code>BatchPlan</code>, <code>PickItem</code>,
+                    <code>PickerTrack</code>, <code>TrackPoint</code>, <code>PlanMetrics</code></td>
+                <td>Respuesta: geometría, lotes con sus artículos, recorridos temporizados de cada picker y métricas.</td>
+            </tr>
+        </tbody>
+    </table>
+    <p>
+        <code>SimulationFrame</code> y <code>AgentState</code> también viven aquí, pero no viajan por la red:
+        la web los calcula a partir de los <code>PickerTrack</code>.
+    </p>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="core">
+    <h2>5. HeuristicsApp.Core</h2>
+    <p>El corazón algorítmico. Librería pura, testeable sin servidor.</p>
+
+    <h3 class="h5">Model/</h3>
+    <ul>
+        <li><code>Warehouse.cs</code>: <code>Coordinate</code> (distancia Manhattan), <code>Aisle</code>,
+            <code>StorageLocation</code>, <code>WarehouseLayout</code> (depósito, pasillos, ubicación de cada SKU)
+            y <code>WarehouseDimensions</code> (ancho, largo, separación entre pasillos).</li>
+        <li><code>Order.cs</code>: <code>Order</code>, <code>OrderLine</code>, <code>PickerCapacity</code> y
+            <code>WarehouseProblem</code>, la entrada completa de las heurísticas.</li>
+        <li><code>Batch.cs</code> y <code>PickRoute.cs</code>: un lote de pedidos y su ruta resuelta
+            (paradas ordenadas + distancia).</li>
+        <li><code>PickerTiming.cs</code>: velocidad de desplazamiento y tiempo de recogida por artículo;
+            calcula la duración de cada lote.</li>
+    </ul>
+
+    <h3 class="h5">Instances/</h3>
+    <ul>
+        <li><code>WarehouseInstanceLoader</code> convierte los JSON del benchmark en un <code>WarehouseProblem</code>:
+            geometría (pasillo <em>i</em> en X = i·(shelfWidth + aisleWidth), depósito en (0,0)), pedidos,
+            capacidad (<code>workerCapacity</code>) y tiempos (<code>travelSpeed</code>, <code>pickingTime</code>).</li>
+        <li><code>InstanceDtos.cs</code>: forma exacta del fichero JSON.</li>
+        <li>Las instancias están en <code>WarehouseInstances/</code> y se copian a la salida de compilación. En
+            desarrollo la API lee directamente esa carpeta del código fuente; su contenido se puede mantener
+            al día desde el repositorio de datos (<a href="docs#instancias">sección 10</a>).</li>
+    </ul>
+
+    <h3 class="h5">Heuristics/</h3>
+    <table class="table table-sm">
+        <thead><tr><th>Interfaz</th><th>Contrato</th><th>Implementaciones</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><code>IBatchingStrategy</code></td>
+                <td><code>CreateBatches(problem, routing, ct)</code> → lista de lotes. <code>routing</code> es el
+                    routing elegido para el plan, para las heurísticas que miden el coste de cada lote.</td>
+                <td><code>RandomBatching</code>, <code>BasicConstructiveBatching</code>, <code>CWSavingConstructiveBatching</code></td>
+            </tr>
+            <tr>
+                <td><code>IRoutingStrategy</code></td>
+                <td><code>Route(batch, layout, ct)</code> → <code>PickRoute</code></td>
+                <td><code>SShapeRouting</code>, <code>LargestGapRouting</code>, <code>CombinedRouting</code>,
+                    <code>RatliffRosenthalRouting</code> (en desarrollo, no habilitada)</td>
+            </tr>
+        </tbody>
+    </table>
+    <p>Ambas interfaces exponen además <code>Key</code> (identificador estable) y <code>DisplayName</code> (texto de la UI).</p>
+
+    <h3 class="h5">Planning/</h3>
+    <ul>
+        <li><code>OperationPlanner.Build</code>: ejecuta el batching elegido (pasándole el routing elegido),
+            enruta cada lote con ese mismo routing y mide el tiempo de cómputo.</li>
+        <li><code>PickerScheduler</code>: reparte los lotes entre K pickers; cada lote va al que antes queda libre.</li>
+        <li><code>OperationPlan</code>: rutas, asignaciones, distancia total y <em>makespan</em> (fin del último picker).</li>
+    </ul>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="apiservice">
+    <h2>6. HeuristicsApp.ApiService</h2>
+    <p>Minimal API que expone Core. Todo se configura en <code>Program.cs</code>.</p>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Endpoint</th><th>Devuelve</th></tr></thead>
+        <tbody>
+            <tr><td><code>GET /strategies</code></td><td>Heurísticas de batching y routing habilitadas.</td></tr>
+            <tr><td><code>GET /warehouse-folders</code></td><td>Carpetas de instancias con su número de ficheros.</td></tr>
+            <tr><td><code>GET /warehouses?folder=X</code></td><td>Instancias de una carpeta (404 si no existe).</td></tr>
+            <tr><td><code>POST /plan</code></td><td>Ejecuta el plan y devuelve un <code>SimulationResult</code>.
+                400 si la heurística no existe, 404 si el almacén no existe, 422 si el fichero no se puede leer.</td></tr>
+            <tr><td><code>GET /dataset/status</code></td><td>Estado de la sincronización de instancias.</td></tr>
+            <tr><td><code>POST /dataset/sync?dryRun=</code></td><td>Lanza la comprobación (<code>dryRun=true</code>) o la
+                sincronización en segundo plano. 409 si ya hay una en curso, 503 si el repositorio no está configurado.</td></tr>
+        </tbody>
+    </table>
+    <ul>
+        <li><code>Warehouses/FileWarehouseProvider</code>: indexa las rutas de la carpeta de instancias (ocupan
+            más de 1 GB); cada fichero se lee al usarse. El id de cada instancia es un Guid derivado de su ruta
+            relativa. <code>Reload()</code> rehace el índice tras una sincronización.</li>
+        <li><code>Warehouses/DatasetSyncService</code> y <code>WarehouseDatasetOptions</code>: sincronización de la
+            carpeta de instancias con el repositorio de datos (<a href="docs#instancias">sección 10</a>).</li>
+        <li><code>Simulation/RouteSimulator</code>: convierte cada asignación en una línea temporal (puntos con
+            instante, incluidas las paradas de recogida) y calcula cuándo se recoge cada artículo.</li>
+        <li><code>Mapping/PlanMapping</code>: traduce <code>OperationPlan</code> a <code>SimulationResult</code>.</li>
+    </ul>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="web">
+    <h2>7. HeuristicsApp.Web</h2>
+    <p>Blazor con renderizado interactivo en servidor.</p>
+    <ul>
+        <li><code>PlanningApiClient</code>: cliente HTTP tipado hacia la API.</li>
+        <li><code>Components/Pages/Planner.razor</code>: selectores, ejecución, métricas, reproducción
+            (reloj de simulación con velocidad x1…x600), modo Auto, aislamiento de lotes y ventana de artículos.</li>
+        <li><code>Components/WarehouseMap.razor</code>: dibuja el almacén en SVG (pasillos, rutas, artículos,
+            pickers, depósito y cotas). El eje Y se invierte para que el frontal quede abajo; las cotas se
+            dibujan fuera de ese grupo para que el texto no salga invertido.</li>
+        <li><code>TrackPlayback.cs</code>: interpola la posición de cada picker en cualquier instante a partir
+            de su <code>PickerTrack</code> (búsqueda binaria + interpolación lineal).</li>
+        <li><code>Components/Pages/Dataset.razor</code> (<em>Instancias</em>): comprobar y lanzar la sincronización
+            con el repositorio, con progreso en tiempo real.</li>
+        <li><code>Components/Pages/Home.razor</code> (guía de usuario) y esta página de documentación.</li>
+        <li><code>wwwroot/</code>: estilos, Bootstrap y logos.</li>
+    </ul>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="flujo">
+    <h2>8. Flujo de una petición de plan</h2>
+    <ol>
+        <li>La web envía <code>POST /plan</code> con el almacén, las claves de batching y routing y el nº de pickers.</li>
+        <li>La API valida las claves contra las heurísticas registradas y carga la instancia desde disco.</li>
+        <li><code>OperationPlanner</code> crea los lotes (el batching recibe el routing elegido) y la ruta de cada uno.</li>
+        <li><code>PickerScheduler</code> asigna los lotes a los pickers según <code>PickerTiming</code>.</li>
+        <li><code>RouteSimulator</code> genera la línea temporal de cada lote y los instantes de recogida.</li>
+        <li><code>PlanMapping</code> construye el <code>SimulationResult</code> y la API lo devuelve.</li>
+        <li>La web dibuja el mapa y, al reproducir, <code>TrackPlayback</code> calcula las posiciones en cada instante.</li>
+    </ol>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="algoritmos">
+    <h2>9. Guía: añadir, ajustar y habilitar algoritmos</h2>
+
+    <div class="alert alert-info">
+        <strong>La API decide qué algoritmos están listos.</strong> Un algoritmo está disponible si y solo si
+        está <strong>registrado</strong> en <code>HeuristicsApp.ApiService/Program.cs</code>.
+        <code>GET /strategies</code> devuelve exactamente los registrados, la web construye sus selectores a
+        partir de esa lista y <code>POST /plan</code> rechaza cualquier clave no registrada. No hay que tocar
+        la web para añadir, ocultar o retirar un algoritmo.
+    </div>
+
+    <h3 class="h5">Paso 1 · Implementar la interfaz en Core</h3>
+    <p>
+        Crea una clase en <code>HeuristicsApp.Core/Heuristics/Routing/</code> (o <code>Batching/</code>) que
+        implemente la interfaz correspondiente:
+    </p>
+    <pre><code>namespace HeuristicsApp.Core;
+
+public sealed class MiRouting : IRoutingStrategy
+{
+    public string Key =&gt; "mi-routing";          // único y estable: lo usan la API y la web
+    public string DisplayName =&gt; "Mi routing";  // texto del selector
+
+    public PickRoute Route(Batch batch, WarehouseLayout layout, CancellationToken ct)
+    {
+        var stops = new List&lt;Coordinate&gt; { layout.Depot };
+        // ... añadir las ubicaciones de los artículos (layout.LocationsBySku[sku].Position) ...
+        stops.Add(layout.Depot);
+
+        var distance = 0d;
+        for (var i = 1; i &lt; stops.Count; i++)
+            distance += layout.Distance(stops[i - 1], stops[i]);
+
+        return new PickRoute(batch, stops, distance);
+    }
+}</code></pre>
+    <p class="mb-1">Reglas que el resto de la aplicación da por supuestas:</p>
+    <ul>
+        <li><strong>Routing</strong>: la ruta empieza y acaba en <code>layout.Depot</code>, la distancia se
+            calcula con <code>layout.Distance</code>, y la ruta <strong>pasa por la posición de cada artículo</strong>
+            (idealmente como parada). Si no, ese artículo no tendrá hora de recogida ni parada en la animación.</li>
+        <li><strong>Batching</strong>: cada pedido aparece en exactamente un lote y cada lote respeta
+            <code>problem.Capacity</code> (peso y/o unidades). Si necesitas el coste de recorrer un lote, usa
+            el <code>routing</code> que recibe <code>CreateBatches</code>; si no, ignóralo.</li>
+        <li>Llama a <code>ct.ThrowIfCancellationRequested()</code> en los bucles largos.</li>
+        <li>No dependas de Contracts ni de ASP.NET desde Core.</li>
+    </ul>
+
+    <h3 class="h5">Paso 2 · Registrarlo en la API (habilitarlo)</h3>
+    <pre><code>// HeuristicsApp.ApiService/Program.cs
+builder.Services.AddSingleton&lt;IRoutingStrategy, MiRouting&gt;();</code></pre>
+    <p>
+        Al reiniciar la API aparece en <code>GET /strategies</code> y, por tanto, en el selector de la web.
+        <strong>Para retirarlo</strong> (por ejemplo, mientras está en desarrollo) basta con no registrarlo
+        o comentar esa línea. Es el caso de <code>RatliffRosenthalRouting</code>, que existe en Core pero
+        no se ofrece.
+    </p>
+    <div class="alert alert-warning small">
+        Las <code>Key</code> deben ser únicas: los diccionarios de estrategias se construyen con
+        <code>ToDictionary(s =&gt; s.Key)</code> y una clave repetida hace fallar el arranque de la API.
+    </div>
+
+    <h3 class="h5">Paso 3 · Ajustar parámetros</h3>
+    <p>
+        Los parámetros de un algoritmo se exponen en su constructor y se fijan al registrarlo, sin tocar
+        el algoritmo:
+    </p>
+    <pre><code>// Semilla distinta para el batching aleatorio
+builder.Services.AddSingleton&lt;IBatchingStrategy&gt;(new RandomBatching(seed: 7));
+
+// Basic Constructive evaluando solo el último lote abierto
+builder.Services.AddSingleton&lt;IBatchingStrategy&gt;(new BasicConstructiveBatching(compact: false));</code></pre>
+    <p>
+        Si quieres ofrecer dos variantes del mismo algoritmo a la vez, cada una necesita su propia
+        <code>Key</code> (por ejemplo, recibiéndola también por constructor).
+    </p>
+
+    <h3 class="h5">Paso 4 · Batching que necesita el coste de las rutas</h3>
+    <p>
+        Algunas heurísticas de batching (como <code>CWSavingConstructiveBatching</code>) deciden qué pedidos
+        agrupar midiendo cuánto cuesta recorrer cada lote. Para ello usan el parámetro <code>routing</code>
+        de <code>CreateBatches</code>, que es el routing elegido en la web. Así los lotes se optimizan para
+        la misma ruta con la que luego se recorren.
+    </p>
+    <pre><code>public IReadOnlyList&lt;Batch&gt; CreateBatches(WarehouseProblem problem, IRoutingStrategy routing, CancellationToken ct)
+{
+    // ...
+    var coste = routing.Route(lote, problem.Layout, ct).Distance;
+    // ...
+}</code></pre>
+    <p>
+        Se registran igual que cualquier otra:
+        <code>builder.Services.AddSingleton&lt;IBatchingStrategy, CWSavingConstructiveBatching&gt;();</code>
+    </p>
+
+    <h3 class="h5">Paso 5 · Probarlo</h3>
+    <ul>
+        <li>Comprueba que aparece: <code>GET /strategies</code>.</li>
+        <li>Ejecútalo directamente contra la API. <code>HeuristicsApp.ApiService.http</code> trae estas
+            peticiones listas para lanzar desde Visual Studio o VS Code:</li>
+    </ul>
+    <pre><code>POST /plan
+Content-Type: application/json
+
+{
+  "warehouseId": "&lt;id obtenido de GET /warehouses?folder=W5A&gt;",
+  "batchingKey": "basicConstructive",
+  "routingKey": "mi-routing",
+  "options": { "pickers": 2 }
+}</code></pre>
+    <ul>
+        <li>En la web, la animación revela rápidamente rutas incoherentes: saltos diagonales, artículos que
+            nunca se rellenan o pickers que no vuelven al depósito.</li>
+        <li>La preselección por defecto del planificador (<code>random</code> y <code>s-shape</code>) está en
+            <code>Planner.razor</code>, método <code>OnInitializedAsync</code>.</li>
+    </ul>
+</section>
+
+@* ------------------------------------------------------------------ *@
+<section id="instancias">
+    <h2>10. Sincronización de instancias con el repositorio</h2>
+    <p>
+        La carpeta de instancias puede mantenerse <strong>idéntica</strong> a una carpeta (por defecto
+        <code>/dataset</code>) de un repositorio GitHub, normalmente privado. Se lanza desde la pestaña
+        <strong>Instancias</strong> de la web o con <code>POST /dataset/sync</code>.
+    </p>
+
+    <h3 class="h5">Configuración</h3>
+    <p class="mb-1">En <code>HeuristicsApp.ApiService/appsettings.json</code>, sección <code>WarehouseDataset</code>:</p>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Clave</th><th>Significado</th></tr></thead>
+        <tbody>
+            <tr><td><code>Owner</code>, <code>Repo</code></td><td>Repositorio GitHub (obligatorios para sincronizar).</td></tr>
+            <tr><td><code>Branch</code></td><td>Rama; vacía = rama por defecto del repositorio.</td></tr>
+            <tr><td><code>Path</code></td><td>Carpeta del repositorio a replicar (por defecto <code>dataset</code>).</td></tr>
+            <tr><td><code>InstancesPath</code></td><td>Carpeta local, relativa a la API. En desarrollo
+                (<code>appsettings.Development.json</code>) apunta a <code>../HeuristicsApp.Core/WarehouseInstances</code>;
+                si se omite, se usa la copia de la salida de compilación (lo habitual en Docker).</td></tr>
+            <tr><td><code>Token</code></td><td>Token de acceso con permiso de lectura de contenidos. <strong>Nunca</strong> en appsettings.</td></tr>
+            <tr><td><code>IndividualDownloadLimit</code></td><td>Hasta cuántos ficheros se descargan uno a uno (200); por encima, zip.</td></tr>
+        </tbody>
+    </table>
+    <p class="mb-1">El token se guarda fuera del código:</p>
+    <pre><code># Local (user-secrets del proyecto ApiService)
+dotnet user-secrets set "WarehouseDataset:Token" "&lt;token&gt;" --project HeuristicsApp.ApiService
+
+# Docker / producción: variable de entorno
+WarehouseDataset__Token=&lt;token&gt;</code></pre>
+
+    <h3 class="h5">Cómo funciona</h3>
+    <ol>
+        <li>Fija el commit actual de la rama; todas las lecturas usan ese commit, así un push a mitad no mezcla versiones.</li>
+        <li>Lista el árbol remoto (una petición) y compara cada fichero con el local por su hash de blob git,
+            sin descargar nada. <em>Comprobar cambios</em> se detiene aquí y muestra cuántos ficheros son nuevos,
+            cambian o sobran.</li>
+        <li>Descarga lo nuevo o modificado: uno a uno si son pocos, o el zip del commit si son muchos (para no
+            agotar el límite de peticiones de GitHub). Cada fichero se verifica contra su hash y se sustituye de
+            forma atómica.</li>
+        <li>Borra los ficheros locales que no existen en el repositorio y las carpetas que quedan vacías.</li>
+        <li>Reindexa las instancias: el planificador ve los cambios al volver a abrirlo, sin reiniciar la API.</li>
+    </ol>
+
+    <h3 class="h5">Garantías y límites</h3>
+    <ul>
+        <li>Si la carpeta remota no existe o está vacía (configuración errónea) no se toca nada en local.</li>
+        <li>Si la sincronización falla a mitad, los ficheros ya sustituidos se conservan; repetirla completa el resto.</li>
+        <li>Solo hay una sincronización a la vez, y los endpoints no tienen autenticación: pensados para uso local o en una red de confianza.</li>
+        <li>No soporta ficheros almacenados con Git LFS (se detectan y la sincronización falla con un mensaje claro).</li>
+        <li>En Docker, sin un volumen para la carpeta de instancias, lo sincronizado se pierde al recrear el contenedor.</li>
+    </ul>
+</section>
+</div>
