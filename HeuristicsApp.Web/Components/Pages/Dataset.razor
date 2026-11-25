@@ -1,0 +1,243 @@
+@page "/instancias"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject PlanningApiClient Api
+
+<PageTitle>Instancias · HeuristicsApp</PageTitle>
+
+<h1>Instancias de almacén</h1>
+<p class="lead">
+    Mantén la carpeta de instancias idéntica a la carpeta <code>@(status?.RemotePath ?? "dataset")</code>
+    del repositorio de datos: se descargan los ficheros nuevos o modificados y se borran los que ya no existen en él.
+</p>
+
+@if (loadError is not null)
+{
+    <div class="alert alert-danger">No se pudo consultar el estado: @loadError</div>
+}
+else if (status is null)
+{
+    <p><em>Cargando…</em></p>
+}
+else
+{
+    <div class="card mb-3" style="max-width:48rem">
+        <div class="card-body">
+            <dl class="row mb-0 small">
+                <dt class="col-sm-3">Repositorio</dt>
+                <dd class="col-sm-9">@(status.Repository ?? "—")</dd>
+                <dt class="col-sm-3">Rama</dt>
+                <dd class="col-sm-9">
+                    @(status.Branch ?? "rama por defecto")
+                    @if (status.Commit is not null)
+                    {
+                        <span class="text-muted"> · commit <code>@status.Commit</code></span>
+                    }
+                </dd>
+                <dt class="col-sm-3">Carpeta remota</dt>
+                <dd class="col-sm-9"><code>/@status.RemotePath</code></dd>
+                <dt class="col-sm-3">Carpeta local</dt>
+                <dd class="col-sm-9"><code class="text-break">@status.LocalPath</code></dd>
+            </dl>
+        </div>
+    </div>
+
+    @if (!status.Configured)
+    {
+        <div class="alert alert-warning" style="max-width:48rem">
+            <strong>El repositorio no está configurado.</strong> Indica el repositorio en
+            <code>HeuristicsApp.ApiService/appsettings.json</code> (sección <code>WarehouseDataset</code>:
+            <code>Owner</code>, <code>Repo</code> y opcionalmente <code>Branch</code>) y guarda el token del
+            repositorio privado fuera del código:
+            <pre class="mb-0 mt-2"><code>dotnet user-secrets set "WarehouseDataset:Token" "&lt;token&gt;" --project HeuristicsApp.ApiService</code></pre>
+            En Docker, usa la variable de entorno <code>WarehouseDataset__Token</code>. Reinicia la API después.
+        </div>
+    }
+    else
+    {
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <button class="btn btn-outline-primary" disabled="@status.IsRunning" @onclick="() => StartAsync(dryRun: true)">
+                Comprobar cambios
+            </button>
+            @if (!confirming)
+            {
+                <button class="btn btn-accent" disabled="@status.IsRunning" @onclick="() => confirming = true">
+                    Sincronizar
+                </button>
+            }
+            else
+            {
+                <div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2 mb-0">
+                    <span>
+                        Se descargarán los cambios y <strong>se borrarán</strong> los ficheros locales que no estén en el repositorio.
+                    </span>
+                    <button class="btn btn-sm btn-warning" @onclick="() => StartAsync(dryRun: false)">Confirmar</button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => confirming = false">Cancelar</button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (actionError is not null)
+    {
+        <div class="alert alert-danger" style="max-width:48rem">@actionError</div>
+    }
+
+    @if (status.State != "idle")
+    {
+        <div class="card" style="max-width:48rem">
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge @StateBadge">@StateLabel</span>
+                    @if (status.DryRun)
+                    {
+                        <span class="badge bg-light text-dark border">solo comprobación</span>
+                    }
+                    @if (status.IsRunning)
+                    {
+                        <span class="spinner-border spinner-border-sm text-secondary" role="status"></span>
+                    }
+                    <span class="small text-muted ms-auto">
+                        @if (status.StartedAt is { } started)
+                        {
+                            <span>Inicio @started.ToLocalTime().ToString("HH:mm:ss")</span>
+                        }
+                        @if (status.FinishedAt is { } finished)
+                        {
+                            <span> · fin @finished.ToLocalTime().ToString("HH:mm:ss")</span>
+                        }
+                    </span>
+                </div>
+
+                @if (status.Message is not null)
+                {
+                    <p class="mb-2">@status.Message</p>
+                }
+
+                @if (status.Changes is { } c)
+                {
+                    @if (status.State == "downloading" && c.ToDownload > 0)
+                    {
+                        var pct = 100.0 * status.Downloaded / c.ToDownload;
+                        <div class="progress mb-2" role="progressbar" aria-valuenow="@((int)pct)" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar" style="width:@(pct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%;background-color:#1F81BF">
+                                @status.Downloaded / @c.ToDownload
+                            </div>
+                        </div>
+                    }
+                    <table class="table table-sm w-auto mb-0">
+                        <tbody>
+                            <tr><td>Sin cambios</td><td class="text-end">@c.Unchanged</td></tr>
+                            <tr><td>Nuevos</td><td class="text-end">@c.Added</td></tr>
+                            <tr><td>Modificados</td><td class="text-end">@c.Updated</td></tr>
+                            <tr><td>@(status.DryRun ? "A eliminar" : "Eliminados")</td><td class="text-end">@c.Deleted</td></tr>
+                            <tr><td>Descarga</td><td class="text-end">@FormatBytes(c.DownloadBytes)</td></tr>
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private DatasetStatus? status;
+    private string? loadError, actionError;
+    private bool confirming;
+
+    private PeriodicTimer? poller;
+    private CancellationTokenSource? pollCts;
+
+    private string StateLabel => status?.State switch
+    {
+        "checking" => "Comprobando",
+        "downloading" => "Descargando",
+        "applying" => "Aplicando cambios",
+        "succeeded" => "Completado",
+        "failed" => "Error",
+        _ => "Inactivo",
+    };
+
+    private string StateBadge => status?.State switch
+    {
+        "succeeded" => "bg-success",
+        "failed" => "bg-danger",
+        _ => "bg-secondary",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            status = await Api.GetDatasetStatusAsync();
+            if (status?.IsRunning == true) _ = PollAsync();
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+        }
+    }
+
+    private async Task StartAsync(bool dryRun)
+    {
+        confirming = false;
+        actionError = null;
+        try
+        {
+            var (started, error) = await Api.StartDatasetSyncAsync(dryRun);
+            if (started is null)
+            {
+                actionError = error;
+                return;
+            }
+            status = started;
+            _ = PollAsync();
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+    }
+
+    // Consulta el estado cada segundo mientras la sincronización esté en curso.
+    private async Task PollAsync()
+    {
+        StopPolling();
+        pollCts = new CancellationTokenSource();
+        poller = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            while (await poller.WaitForNextTickAsync(pollCts.Token))
+            {
+                status = await Api.GetDatasetStatusAsync(pollCts.Token);
+                await InvokeAsync(StateHasChanged);
+                if (status is null || !status.IsRunning) break;
+            }
+        }
+        catch (OperationCanceledException) { /* página cerrada */ }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void StopPolling()
+    {
+        pollCts?.Cancel();
+        pollCts?.Dispose();
+        pollCts = null;
+        poller?.Dispose();
+        poller = null;
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1L << 30 => $"{bytes / (double)(1L << 30):0.##} GB",
+        >= 1L << 20 => $"{bytes / (double)(1L << 20):0.#} MB",
+        >= 1L << 10 => $"{bytes / (double)(1L << 10):0} KB",
+        _ => $"{bytes} B",
+    };
+
+    public void Dispose() => StopPolling();
+}
